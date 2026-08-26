@@ -1,0 +1,110 @@
+{
+  "skill": "yolo.export",
+  "status": "ok",
+  "summary": "export finished",
+  "artifacts": [],
+  "environment": {
+    "python": {
+      "executable": "/opt/anaconda3/bin/python",
+      "version": "3.13.9"
+    },
+    "workspace": {
+      "repo_root": "/Users/lilliansun/RhinoBird/YOLO-Master",
+      "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master"
+    },
+    "ultralytics": {
+      "repo_version": "8.4.101",
+      "module_version": "8.4.101",
+      "module_path": "/Users/lilliansun/RhinoBird/YOLO-Master/ultralytics/__init__.py",
+      "local_repo_active": true
+    },
+    "cli": {
+      "available": true,
+      "path": "/opt/anaconda3/bin/yolo",
+      "status": "available",
+      "install": {
+        "status": "available",
+        "path": "/opt/anaconda3/bin/yolo"
+      }
+    },
+    "devices": {
+      "requested": "mps",
+      "selected": "mps",
+      "available": [
+        "mps",
+        "cpu"
+      ],
+      "selection_source": "auto",
+      "torch": {
+        "installed": true,
+        "version": "2.12.0",
+        "cuda": {
+          "available": false,
+          "device_count": 0,
+          "devices": []
+        },
+        "mps": {
+          "built": true,
+          "available": true
+        }
+      }
+    },
+    "runtime": {},
+    "references": {
+      "model": {
+        "requested": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+        "resolved": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+        "exists": true
+      },
+      "data": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      },
+      "source": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      }
+    }
+  },
+  "auto_completed": {},
+  "job": {
+    "mode": "sync",
+    "save_dir": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-export-483999cc",
+    "executor": "cli"
+  },
+  "logs": {
+    "cmd": [
+      "/opt/anaconda3/bin/yolo",
+      "export",
+      "model=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+      "format=onnx",
+      "project=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent",
+      "name=yolo-export-483999cc"
+    ],
+    "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master",
+    "stdout": "Ultralytics 8.4.101 🚀 Python-3.13.9 torch-2.12.0 CPU (Apple M4)\nYOLO11n summary (fused): 101 layers, 2,616,248 parameters, 0 gradients, 6.5 GFLOPs\n\nPyTorch: starting from '/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt' with input shape (1, 3, 32, 32) BCHW and output shape(s) (1, 84, 21) (5.2 MB)\nrequirements: Ultralytics requirements ['onnx>=1.12.0,<2.0.0', 'onnxruntime', 'onnxslim>=0.1.82'] not found, attempting AutoUpdate...\nLooking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple\nWARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out. (read timeout=15)\")': /simple/onnx/\nWARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out. (read timeout=15)\")': /simple/onnx/\nWARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out. (read timeout=15)\")': /simple/onnx/\nWARNING: Retrying (Retry(total=1, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ConnectTimeoutError(<pip._vendor.urllib3.connection.HTTPSConnection object at 0x106b0de50>, 'Connection to pypi.tuna.tsinghua.edu.cn timed out. (connect timeout=15)')': /simple/onnx/\nWARNING: Retrying (Retry(total=0, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError(\"HTTPSConnectionPool(host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out. (read timeout=15)\")': /simple/onnx/\nCollecting onnx<2.0.0,>=1.12.0\n  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/ee/6a/481561f1093834376ed493e4ca42a73e5be0d50031f2969c86593bdc7c96/onnx-1.22.0-cp312-abi3-macosx_12_0_universal2.whl (20.2 MB)\n     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 20.2/20.2 MB 2.4 MB/s  0:00:08\nCollecting onnxruntime\n  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/41/f8/d375facf60edaf41f5732f9f689c98a800fcc52df5cf6ddfb406703eb5a1/onnxruntime-1.29.0-cp313-cp313-macosx_14_0_arm64.whl (21.4 MB)\n     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 21.4/21.4 MB 1.2 MB/s  0:00:17\nCollecting onnxslim>=0.1.82\n  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/dc/c0/7a491ab9ebc7fc7dfccb7ca36251d9d54ee35b9c88427733f05b09fc40e9/onnxslim-0.1.96-py3-none-any.whl (239 kB)\nRequirement already satisfied: numpy>=1.23.2 in /opt/anaconda3/lib/python3.13/site-packages (from onnx<2.0.0,>=1.12.0) (2.3.5)\nRequirement already satisfied: protobuf>=4.25.1 in /opt/anaconda3/lib/python3.13/site-packages (from onnx<2.0.0,>=1.12.0) (7.35.0)\nRequirement already satisfied: typing_extensions>=4.15.0 in /opt/anaconda3/lib/python3.13/site-packages (from onnx<2.0.0,>=1.12.0) (4.15.0)\nRequirement already satisfied: ml_dtypes>=0.5.4 in /opt/anaconda3/lib/python3.13/site-packages (from onnx<2.0.0,>=1.12.0) (0.5.4)\nRequirement already satisfied: flatbuffers in /opt/anaconda3/lib/python3.13/site-packages (from onnxruntime) (25.12.19)\nRequirement already satisfied: packaging in /opt/anaconda3/lib/python3.13/site-packages (from onnxruntime) (25.0)\nCollecting colorama (from onnxslim>=0.1.82)\n  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/d1/d6/3965ed04c63042e047cb6a3e6ed1a63a35087b6a609aa3a15ed8ac56c221/colorama-0.4.6-py2.py3-none-any.whl (25 kB)\nRequirement already satisfied: sympy>=1.13.1 in /opt/anaconda3/lib/python3.13/site-packages (from onnxslim>=0.1.82) (1.14.0)\nRequirement already satisfied: mpmath<1.4,>=1.1.0 in /opt/anaconda3/lib/python3.13/site-packages (from sympy>=1.13.1->onnxslim>=0.1.82) (1.3.0)\nInstalling collected packages: onnxruntime, colorama, onnx, onnxslim\n\nSuccessfully installed colorama-0.4.6 onnx-1.22.0 onnxruntime-1.29.0 onnxslim-0.1.96\n\nrequirements: AutoUpdate success ✅ 142.8s\nWARNING ⚠️ requirements: Restart runtime or rerun command for updates to take effect\n\n\nONNX: starting export with onnx 1.22.0 opset 20...\nONNX: slimming with onnxslim 0.1.96...\nONNX: export success ✅ 144.5s, saved as '/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.onnx' (10.1 MB)\n\nExport complete (144.6s)\nResults saved to /Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.onnx\nPredict:         yolo predict task=detect model=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.onnx imgsz=32 \nValidate:        yolo val task=detect model=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.onnx imgsz=32 data=/Users/lilliansun/RhinoBird/YOLO-Master/ultralytics/cfg/datasets/coco8.yaml  \nVisualize:       https://netron.app\n💡 Learn more at https://docs.ultralytics.com/modes/export\n",
+    "stderr": "",
+    "install": {
+      "status": "available",
+      "path": "/opt/anaconda3/bin/yolo"
+    }
+  },
+  "usage": {
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0
+    },
+    "requests": 0,
+    "records": []
+  },
+  "cost_estimate": {
+    "currency": "USD",
+    "amount": 0.0,
+    "basis": "no token usage"
+  },
+  "request_id": "yolo-export-483999cc",
+  "manifest": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-export-483999cc/skill_manifest.json"
+}

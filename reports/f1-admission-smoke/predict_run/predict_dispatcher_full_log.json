@@ -1,0 +1,134 @@
+{
+  "skill": "yolo.predict",
+  "status": "ok",
+  "summary": "predict finished",
+  "job": {
+    "mode": "sync",
+    "save_dir": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-predict-14f58794",
+    "executor": "cli",
+    "device": "mps"
+  },
+  "results": [
+    {
+      "path": "/Users/lilliansun/RhinoBird/datasets/coco8/images/val/000000000036.jpg",
+      "raw": "32x32 (no detections), 11.0ms",
+      "boxes": 0,
+      "speed": {
+        "preprocess": 80.3,
+        "inference": 11.0,
+        "postprocess": 7.9
+      }
+    }
+  ],
+  "environment": {
+    "python": {
+      "executable": "/opt/anaconda3/bin/python",
+      "version": "3.13.9"
+    },
+    "workspace": {
+      "repo_root": "/Users/lilliansun/RhinoBird/YOLO-Master",
+      "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master"
+    },
+    "ultralytics": {
+      "repo_version": "8.4.101",
+      "module_version": "8.4.101",
+      "module_path": "/Users/lilliansun/RhinoBird/YOLO-Master/ultralytics/__init__.py",
+      "local_repo_active": true
+    },
+    "cli": {
+      "available": true,
+      "path": "/opt/anaconda3/bin/yolo",
+      "status": "available",
+      "install": {
+        "status": "available",
+        "path": "/opt/anaconda3/bin/yolo"
+      }
+    },
+    "devices": {
+      "requested": "mps",
+      "selected": "mps",
+      "available": [
+        "mps",
+        "cpu"
+      ],
+      "selection_source": "auto",
+      "torch": {
+        "installed": true,
+        "version": "2.12.0",
+        "cuda": {
+          "available": false,
+          "device_count": 0,
+          "devices": []
+        },
+        "mps": {
+          "built": true,
+          "available": true
+        }
+      }
+    },
+    "runtime": {},
+    "references": {
+      "model": {
+        "requested": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+        "resolved": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+        "exists": true
+      },
+      "data": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      },
+      "source": {
+        "requested": "/Users/lilliansun/RhinoBird/datasets/coco8/images/val/000000000036.jpg",
+        "resolved": "/Users/lilliansun/RhinoBird/datasets/coco8/images/val/000000000036.jpg",
+        "exists": true
+      }
+    }
+  },
+  "auto_completed": {
+    "device": "mps",
+    "device_source": "auto"
+  },
+  "logs": {
+    "cmd": [
+      "/opt/anaconda3/bin/yolo",
+      "predict",
+      "model=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-train-6a3bce0f/weights/best.pt",
+      "source=/Users/lilliansun/RhinoBird/datasets/coco8/images/val/000000000036.jpg",
+      "device=mps",
+      "project=/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent",
+      "name=yolo-predict-14f58794"
+    ],
+    "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master",
+    "stdout": "Ultralytics 8.4.101 🚀 Python-3.13.9 torch-2.12.0 MPS (Apple M4)\nYOLO11n summary (fused): 101 layers, 2,616,248 parameters, 0 gradients, 6.5 GFLOPs\n\nimage 1/1 /Users/lilliansun/RhinoBird/datasets/coco8/images/val/000000000036.jpg: 32x32 (no detections), 11.0ms\nSpeed: 80.3ms preprocess, 11.0ms inference, 7.9ms postprocess per image at shape (1, 3, 32, 32)\nResults saved to /Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-predict-14f58794\n💡 Learn more at https://docs.ultralytics.com/modes/predict\n",
+    "stderr": "",
+    "install": {
+      "status": "available",
+      "path": "/opt/anaconda3/bin/yolo"
+    }
+  },
+  "attempts": [],
+  "recovery": {},
+  "usage": {
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0
+    },
+    "requests": 0,
+    "records": []
+  },
+  "cost_estimate": {
+    "currency": "USD",
+    "amount": 0.0,
+    "basis": "no token usage"
+  },
+  "artifacts": [
+    {
+      "kind": "directory",
+      "path": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-predict-14f58794"
+    }
+  ],
+  "request_id": "yolo-predict-14f58794",
+  "manifest": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-predict-14f58794/skill_manifest.json"
+}
