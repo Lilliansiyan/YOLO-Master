@@ -18,7 +18,7 @@
 | 配置文件 | [`baseline_run/args.yaml`](./baseline_run/args.yaml) |
 | 完整日志 | [`baseline_run/train_dispatcher_full_log.json`](./baseline_run/train_dispatcher_full_log.json)、[`predict_run/predict_dispatcher_full_log.json`](./predict_run/predict_dispatcher_full_log.json)、[`export_run/export_dispatcher_full_log.json`](./export_run/export_dispatcher_full_log.json) |
 | 结果证据 | [`baseline_run/results.csv`](./baseline_run/results.csv)、[`predict_run/annotated_output.jpg`](./predict_run/annotated_output.jpg)、[`export_run/checksums.sha256`](./export_run/checksums.sha256) |
-| 设计说明 | 本页「4. 设计说明（草稿）」 |
+| 设计说明 | 本页「4. 设计说明」（已验证的 Dispatcher 契约 + 未定层现状对照） |
 | 风险与降级 | 本页「5. 风险与降级」 |
 | 代码/方案链接 | 本仓库本分支 `reports/f1-admission-smoke/` |
 
@@ -64,11 +64,38 @@ python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","in
 
 数据均为官方内置 `coco8`（8 张图 mini 集），目的是验证**训练→推理→导出全链路可端到端跑通**，不是精度评估。`mAP50(B)=0` 属预期：4 张验证图、1 轮训练，尚未形成有效检测精度，不能作为方案精度结论；完整 P0 阶段应在真实规模数据集上报告完整验证集指标。
 
-## 4. 设计说明（草稿，待完善）
+## 4. 设计说明
 
-> ⚠️ 以下为初步理解，非最终设计，需在接口冻结（8.24）后与其他 F1 组员对齐后再定稿。
+> 六层架构的完整设计需在接口冻结（8.24）后与其他 F1 组员对齐才能定稿；本节只画本次真实跑通、有日志为证的部分（Agent Dispatcher 层），其余五层按"已验证 / 待接口冻结 / 未开始"如实标注，不提前假设团队还未拍板的接口形态。
 
-F1 Studio 的定位是在现有 `agent/` Skill 接口层（`run_yolo_master_skill.py` 分发器，本次已验证 train/predict/export 均可通过该分发器真实跑通）之上，把 `app.py` 现有的单图推理 Demo 升级为训练/推理/部署一体化任务工作台。初步理解的六层架构：WebUI Shell / Request Gateway / Agent Dispatcher（复用现有 `agent/` 分发器）/ Async Jobs（复用 `policy.async` 异步任务机制）/ Evidence Stream / Artifact Registry。目前尚未进入具体页面/接口设计阶段。
+### 4.1 已验证：Agent Dispatcher 请求/响应契约
+
+`agent/scripts/run_yolo_master_skill.py` 分发器本次通过 train / predict / export 三个真实最小任务验证了同一套契约：固定的请求结构进、固定的响应结构出，中间转调 `yolo` CLI 并把结果收敛成结构化 JSON。三次运行的日志（见第 3 节）里 `skill` / `status` / `job.executor` / `job.device` / `environment.*` 等字段结构完全一致，只有 `skill` 类型和产出内容不同，这说明分发器层的接口是稳定的，可以作为 F1 Studio 上层（WebUI / Gateway）可以依赖的契约面。
+
+```mermaid
+flowchart LR
+    A["请求方\n(本次=CLI 手动调用\n未来=F1 Request Gateway)"] -->|"{skill, args, policy}\n如 skill=yolo.train"| B["Agent Dispatcher\nrun_yolo_master_skill.py"]
+    B -->|"转调"| C["yolo CLI\n(train/predict/export)"]
+    C -->|"stdout/产物路径"| B
+    B -->|"结构化响应\n{status, summary, job, metrics/results,\nenvironment, artifacts}"| A
+    B -.->|"device 请求失败时自动降级"| D["MPS → CPU 自动回退"]
+    B --> E["Artifact Registry (待建)\n本次落地为 runs/agent/*\n+ 本报告 checksums"]
+```
+
+（字段名逐字取自本次实际日志：`baseline_run/train_dispatcher_full_log.json`、`predict_run/predict_dispatcher_full_log.json`、`export_run/export_dispatcher_full_log.json`，非杜撰示意。）
+
+### 4.2 F1 六层现状对照
+
+| 层 | 本次状态 | 说明 |
+|---|---|---|
+| Agent Dispatcher | ✅ 已验证 | 复用现有 `agent/` 分发器，train/predict/export 三次真实调用均 status=ok，见第 3 节 |
+| Async Jobs | ⏳ 未开始 | 拟复用 `policy.async`，本次三个任务均为 sync 模式（`job.mode=sync`），异步队列未触发，见第 5 节"尚未验证项" |
+| Request Gateway | 🔒 待接口冻结 | 需与 F1 组内约定统一的对外 Request JSON Schema 后才能定型 |
+| WebUI Shell | 🔒 待接口冻结 | 依赖 Request Gateway 接口先定 |
+| Evidence Stream | 🔒 待接口冻结 | 拟对接 progress.jsonl 类实时进度流，格式待组内对齐 |
+| Artifact Registry | ⏳ 未开始 | 本次以 `runs/agent/*` 目录 + 本报告内 SHA-256 checksum 作为最小替代，尚无统一注册/索引机制 |
+
+结论：本次证据证明的是"F1 Studio 最底层——现有 Skill 分发器——在训练/推理/导出全链路上是可信的地基"，其上四层的具体设计有意留白，等团队接口冻结后再定，不在准入阶段编造未拍板的接口细节。
 
 ## 5. 风险与降级
 
