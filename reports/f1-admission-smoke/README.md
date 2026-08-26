@@ -4,7 +4,13 @@
 
 - **志愿**：F1（YOLO-Master Studio，产品化/工程整合方向）
 - **状态**：`success`，train / predict / export 三个真实最小任务均完成，进程退出码 `0`
-- **Baseline 锁定**：tag [`YOLO-Master-v26.08`](https://github.com/Tencent/YOLO-Master/releases/tag/YOLO-Master-v26.08)（commit [`43d4011`](https://github.com/Tencent/YOLO-Master/commit/43d4011)），HEAD 固定在该 commit，不基于 `main`
+- **Baseline 锁定**：tag [`YOLO-Master-v26.08`](https://github.com/Tencent/YOLO-Master/releases/tag/YOLO-Master-v26.08)（commit [`43d4011`](https://github.com/Tencent/YOLO-Master/commit/43d4011)），HEAD 固定在该 commit，不基于 `main`；本机原始验证输出：
+  ```
+  $ git log -1 --oneline
+  600a5ab F1准入证据：设计说明改为已验证Dispatcher契约图+六层现状对照表，去除纯展望性描述
+  $ git merge-base --is-ancestor 43d4011 HEAD && echo "43d4011 is ancestor of HEAD: yes"
+  43d4011 is ancestor of HEAD: yes
+  ```
 - **本地环境**：macOS + Apple Silicon（MPS），Python 3.13.9，`ultralytics==8.4.101`（本地可编辑安装，`local_repo_active: true`）
 - **产出日期**：2026-08-26
 
@@ -16,11 +22,11 @@
 | 基线/最小任务 | 本页「3. 最小任务结果」、[`baseline_run/`](./baseline_run)、[`predict_run/`](./predict_run)、[`export_run/`](./export_run) |
 | 复现命令 | 本页「2. 复现命令」 |
 | 配置文件 | [`baseline_run/args.yaml`](./baseline_run/args.yaml) |
-| 完整日志 | [`baseline_run/train_dispatcher_full_log.json`](./baseline_run/train_dispatcher_full_log.json)、[`predict_run/predict_dispatcher_full_log.json`](./predict_run/predict_dispatcher_full_log.json)、[`export_run/export_dispatcher_full_log.json`](./export_run/export_dispatcher_full_log.json) |
-| 结果证据 | [`baseline_run/results.csv`](./baseline_run/results.csv)、[`predict_run/annotated_output.jpg`](./predict_run/annotated_output.jpg)、[`export_run/checksums.sha256`](./export_run/checksums.sha256) |
+| 完整日志 | [`baseline_run/train_dispatcher_full_log.json`](./baseline_run/train_dispatcher_full_log.json)、[`predict_run/predict_dispatcher_full_log.json`](./predict_run/predict_dispatcher_full_log.json)、[`export_run/export_dispatcher_full_log.json`](./export_run/export_dispatcher_full_log.json)、[`skill_smoke_test_quick.json`](./skill_smoke_test_quick.json)、[`env_install_run/pip_download_interrupt_excerpt.log`](./env_install_run/pip_download_interrupt_excerpt.log) |
+| 结果证据 | [`baseline_run/results.csv`](./baseline_run/results.csv)、[`baseline_run/results.png`](./baseline_run/results.png)、[`baseline_run/weights_meta/checksums.sha256`](./baseline_run/weights_meta/checksums.sha256)、[`predict_run/annotated_output.jpg`](./predict_run/annotated_output.jpg)、[`export_run/checksums.sha256`](./export_run/checksums.sha256) |
 | 设计说明 | 本页「4. 设计说明」（已验证的 Dispatcher 契约 + 未定层现状对照） |
 | 风险与降级 | 本页「5. 风险与降级」 |
-| 代码/方案链接 | 本仓库本分支 `reports/f1-admission-smoke/` |
+| 代码/方案链接 | [`reports/f1-admission-smoke/`](https://github.com/Lilliansiyan/YOLO-Master/tree/siyan/f1-admission-smoke/reports/f1-admission-smoke) |
 
 ## 1. 环境安装
 
@@ -43,14 +49,17 @@ python -m pip install -e . -i https://pypi.org/simple
 # Skill 接口层冒烟测试
 python agent/scripts/validate_yolo_master_skill.py --suite quick --pretty --summary-only
 
+# 环境体检（生成 env_doctor.json）
+python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.system","action":"doctor","inputs":{},"params":{}}' --pretty
+
 # 训练最小任务
 python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.train","inputs":{"model":"yolo11n.pt","data":"coco8.yaml"},"params":{"epochs":1,"imgsz":32}}' --pretty
 
-# 推理最小任务（用上一步产出的 best.pt）
-python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.predict","inputs":{"model":"<best.pt路径>","source":"<coco8验证图路径>"}}' --pretty
+# 推理最小任务（用上一步产出的 best.pt，本次实际路径：runs/agent/yolo-train-6a3bce0f/weights/best.pt）
+python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.predict","inputs":{"model":"runs/agent/yolo-train-6a3bce0f/weights/best.pt","source":"datasets/coco8/images/val/000000000036.jpg"}}' --pretty
 
 # 导出最小任务（ONNX）
-python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","inputs":{"model":"<best.pt路径>"},"params":{"format":"onnx"}}' --pretty
+python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","inputs":{"model":"runs/agent/yolo-train-6a3bce0f/weights/best.pt"},"params":{"format":"onnx"}}' --pretty
 ```
 
 ## 3. 最小任务结果
@@ -58,7 +67,7 @@ python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","in
 | 环节 | 命令 | 状态 | 关键信息 |
 | --- | --- | --- | --- |
 | Skill 接口冒烟测试 | `validate_yolo_master_skill.py --suite quick` | `PASS` | 36/36 用例通过，score 1.0（[`skill_smoke_test_quick.json`](./skill_smoke_test_quick.json)） |
-| 训练（train） | `yolo.train`，`coco8` 1 epoch | `ok` / training finished | 设备 `mps`，耗时约 2.5s，产出 `best.pt`/`last.pt`/`results.csv` |
+| 训练（train） | `yolo.train`，`coco8` 1 epoch | `ok` / training finished | 设备 `mps`，耗时约 2.5s，产出 `best.pt`/`last.pt`/`results.csv`/[`results.png`](./baseline_run/results.png)，权重哈希见 [`weights_meta/checksums.sha256`](./baseline_run/weights_meta/checksums.sha256) |
 | 推理（predict） | `yolo.predict`，对训练产出的 `best.pt` 单图推理 | `ok` / predict finished | 输出标注图见 [`predict_run/annotated_output.jpg`](./predict_run/annotated_output.jpg) |
 | 导出（export） | `yolo.export`，`best.pt` → ONNX | `ok` / export finished | 产出 `best.onnx`（约 10.1MB），哈希见 [`export_run/checksums.sha256`](./export_run/checksums.sha256) |
 
@@ -74,12 +83,12 @@ python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","in
 
 ```mermaid
 flowchart LR
-    A["请求方\n(本次=CLI 手动调用\n未来=F1 Request Gateway)"] -->|"{skill, args, policy}\n如 skill=yolo.train"| B["Agent Dispatcher\nrun_yolo_master_skill.py"]
-    B -->|"转调"| C["yolo CLI\n(train/predict/export)"]
+    A["请求方<br/>(本次=CLI 手动调用<br/>未来=F1 Request Gateway)"] -->|"{skill, args, policy}<br/>如 skill=yolo.train"| B["Agent Dispatcher<br/>run_yolo_master_skill.py"]
+    B -->|"转调"| C["yolo CLI<br/>(train/predict/export)"]
     C -->|"stdout/产物路径"| B
-    B -->|"结构化响应\n{status, summary, job, metrics/results,\nenvironment, artifacts}"| A
+    B -->|"结构化响应<br/>{status, summary, job, metrics/results,<br/>environment, artifacts}"| A
     B -.->|"device 请求失败时自动降级"| D["MPS → CPU 自动回退"]
-    B --> E["Artifact Registry (待建)\n本次落地为 runs/agent/*\n+ 本报告 checksums"]
+    B --> E["Artifact Registry (待建)<br/>本次落地为 runs/agent/*<br/>+ 本报告 checksums"]
 ```
 
 （字段名逐字取自本次实际日志：`baseline_run/train_dispatcher_full_log.json`、`predict_run/predict_dispatcher_full_log.json`、`export_run/export_dispatcher_full_log.json`，非杜撰示意。）
