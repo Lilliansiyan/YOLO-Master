@@ -1,4 +1,4 @@
-# F1（YOLO-Master Studio）准入门禁证据包 — 孙思俨（Lilliansiyan）
+# F1（YOLO-Master Studio）准入门禁证据包 —（Lilliansiyan）
 
 ## 结论
 
