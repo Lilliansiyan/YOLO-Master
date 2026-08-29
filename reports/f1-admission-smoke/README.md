@@ -75,7 +75,7 @@ python agent/scripts/run_yolo_master_skill.py --json '{"skill":"yolo.export","in
 
 ## 4. 设计说明
 
-> 六层架构的完整设计需在接口冻结（8.24）后与其他 F1 组员对齐才能定稿；本节只画本次真实跑通、有日志为证的部分（Agent Dispatcher 层），其余五层按"已验证 / 待接口冻结 / 未开始"如实标注，不提前假设团队还未拍板的接口形态。
+> 六层架构的完整设计需在P0阶段实现过程中根据实际需求逐步明确；本节只画本次真实跑通、有日志为证的部分（Agent Dispatcher 层），其余五层按"已验证 / 待实现 / 未开始"如实标注，不在准入阶段超前设计尚未实际需要的接口细节。
 
 ### 4.1 已验证：Agent Dispatcher 请求/响应契约
 
@@ -99,12 +99,12 @@ flowchart LR
 |---|---|---|
 | Agent Dispatcher | ✅ 已验证 | 复用现有 `agent/` 分发器，train/predict/export 三次真实调用均 status=ok，见第 3 节 |
 | Async Jobs | ⏳ 未开始 | 拟复用 `policy.async`，本次三个任务均为 sync 模式（`job.mode=sync`），异步队列未触发，见第 5 节"尚未验证项" |
-| Request Gateway | 🔒 待接口冻结 | 需与 F1 组内约定统一的对外 Request JSON Schema 后才能定型 |
-| WebUI Shell | 🔒 待接口冻结 | 依赖 Request Gateway 接口先定 |
-| Evidence Stream | 🔒 待接口冻结 | 拟对接 progress.jsonl 类实时进度流，格式待组内对齐 |
+| Request Gateway | 🔒 待实现 | P0阶段可简化为Gradio callback直接调用dispatcher，暂不需要独立的HTTP API层 |
+| WebUI Shell | 🔒 待实现 | 基于现有app.py扩展，新增任务历史、状态查询、产物管理tab |
+| Evidence Stream | 🔒 待实现 | P0阶段可通过轮询job状态实现，实时进度流作为P1优化项 |
 | Artifact Registry | ⏳ 未开始 | 本次以 `runs/agent/*` 目录 + 本报告内 SHA-256 checksum 作为最小替代，尚无统一注册/索引机制 |
 
-结论：本次证据证明的是"F1 Studio 最底层——现有 Skill 分发器——在训练/推理/导出全链路上是可信的地基"，其上四层的具体设计有意留白，等团队接口冻结后再定，不在准入阶段编造未拍板的接口细节。
+结论：本次证据证明的是"F1 Studio 最底层——现有 Skill 分发器——在训练/推理/导出全链路上是可信的地基"，其上四层的具体设计将在P0实现阶段根据实际需求逐步明确，不在准入阶段编造尚未验证的接口细节。
 
 ## 5. 风险与降级
 
