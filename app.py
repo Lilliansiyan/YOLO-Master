@@ -11,6 +11,16 @@ import cv2
 import torch
 from ultralytics import YOLO
 
+# F1 Studio imports
+from f1_studio_db import F1StudioDB
+from f1_studio_tasks import (
+    submit_train,
+    submit_predict,
+    submit_export,
+    submit_system_check,
+    validate_path
+)
+
 # Ignore unnecessary warnings
 warnings.filterwarnings("ignore")
 
@@ -133,6 +143,7 @@ class YOLO_Master_WebUI:
         self.ckpts_root = Path(ckpts_root)
         self.model_manager = ModelManager(self.ckpts_root)
         self.model_map = self.model_manager.scan_checkpoints()
+        self.db = F1StudioDB()  # Initialize F1 Studio database
 
     def inference(self, 
                   task: str, 
@@ -290,95 +301,341 @@ class YOLO_Master_WebUI:
         self.model_map = self.model_manager.scan_checkpoints()
         return self.update_model_dropdown(task)
 
+    # ==================== F1 Studio Task Management Methods ====================
+
+    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int) -> Tuple[str, pd.DataFrame]:
+        """Handle train task submission."""
+        try:
+            response = submit_train(model, data, int(epochs), int(imgsz))
+            job_id = response.get("job_id", "unknown")
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                summary = response.get("summary", "")
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+            else:
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_predict_submit(self, model: str, source: str) -> Tuple[str, pd.DataFrame]:
+        """Handle predict task submission."""
+        try:
+            response = submit_predict(model, source)
+            job_id = response.get("job_id", "unknown")
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                summary = response.get("summary", "")
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+            else:
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_export_submit(self, model: str, format: str) -> Tuple[str, pd.DataFrame]:
+        """Handle export task submission."""
+        try:
+            response = submit_export(model, format)
+            job_id = response.get("job_id", "unknown")
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                summary = response.get("summary", "")
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+            else:
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_system_check(self) -> str:
+        """Handle system check."""
+        try:
+            response = submit_system_check()
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                return f"✅ **Environment Check Passed**\n\n```json\n{json.dumps(response, indent=2)}\n```"
+            else:
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                return f"❌ **Environment Check Failed**\n\n{error_msg}"
+        except Exception as e:
+            return f"❌ **Error running system check**: {str(e)}"
+
+    def load_task_history(self) -> pd.DataFrame:
+        """Load task history from database as DataFrame."""
+        jobs = self.db.load_job_history(limit=50)
+
+        if not jobs:
+            return pd.DataFrame(columns=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
+
+        rows = []
+        for job in jobs:
+            artifact_count = len(job.get("artifacts", []))
+            artifact_str = f"{artifact_count} files" if artifact_count > 0 else "-"
+
+            rows.append({
+                "Job ID": job["job_id"],
+                "Skill": job["skill"],
+                "Status": job["status"],
+                "Submitted At": job["submitted_at"][:19],  # Trim microseconds
+                "Artifacts": artifact_str
+            })
+
+        return pd.DataFrame(rows)
+
+    def view_artifacts(self, job_id: str) -> str:
+        """View artifacts for a specific job."""
+        if not job_id or job_id.strip() == "":
+            return "⚠️ Please enter a Job ID"
+
+        job = self.db.get_job(job_id.strip())
+        if not job:
+            return f"❌ Job not found: {job_id}"
+
+        artifacts = job.get("artifacts", [])
+        if not artifacts:
+            return f"ℹ️ No artifacts found for job {job_id}"
+
+        # Group by category
+        by_category = {}
+        for artifact in artifacts:
+            cat = artifact["category"]
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(artifact)
+
+        # Format output
+        lines = [f"## Artifacts for {job_id}\n"]
+
+        for category in ["weight", "result", "export", "log", "other"]:
+            if category not in by_category:
+                continue
+
+            lines.append(f"### {category.title()}s")
+            for artifact in by_category[category]:
+                size_mb = artifact["size"] / (1024 * 1024)
+                lines.append(f"- `{artifact['rel_path']}` ({size_mb:.2f} MB)")
+                lines.append(f"  - Full path: `{artifact['path']}`")
+
+        return "\n".join(lines)
+
+    def clear_history(self) -> Tuple[str, pd.DataFrame]:
+        """Clear all task history."""
+        count = self.db.clear_history()
+        return f"✅ Cleared {count} records", pd.DataFrame(columns=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
+
     def launch(self):
+        import json  # Import for system check JSON display
+
         with gr.Blocks(title="YOLO-Master WebUI", theme=GlobalConfig.THEME) as app:
             gr.Markdown("# 🚀 YOLO-Master Dashboard")
-            
-            with gr.Row(equal_height=False):
-                # ================= Sidebar: Control Panel =================
-                with gr.Column(scale=1, variant="panel"):
-                    gr.Markdown("### 🛠 Settings")
-                    
-                    # Task and Model Selection
-                    with gr.Group():
-                        task_radio = gr.Radio(
-                            choices=["detect", "seg", "cls", "pose", "obb"], 
-                            value="detect", 
-                            label="Task"
-                        )
-                        with gr.Row():
-                            model_dd = gr.Dropdown(
-                                choices=self.model_map["detect"], 
-                                value=self.model_map["detect"][0] if self.model_map["detect"] else None, 
-                                label="Model Weights", 
-                                scale=5,
-                                interactive=True
+
+            with gr.Tabs():
+                # ================= Original Inference Tab =================
+                with gr.TabItem("🖼️ Inference"):
+                    with gr.Row(equal_height=False):
+                        # Sidebar: Control Panel
+                        with gr.Column(scale=1, variant="panel"):
+                            gr.Markdown("### 🛠 Settings")
+
+                            # Task and Model Selection
+                            with gr.Group():
+                                task_radio = gr.Radio(
+                                    choices=["detect", "seg", "cls", "pose", "obb"],
+                                    value="detect",
+                                    label="Task"
+                                )
+                                with gr.Row():
+                                    model_dd = gr.Dropdown(
+                                        choices=self.model_map["detect"],
+                                        value=self.model_map["detect"][0] if self.model_map["detect"] else None,
+                                        label="Model Weights",
+                                        scale=5,
+                                        interactive=True
+                                    )
+                                    refresh_btn = gr.Button("🔄", scale=1, min_width=10, size="sm")
+                                custom_model_txt = gr.Textbox(
+                                    value="",
+                                    label="Custom Model Path (file or directory)",
+                                    placeholder="./ckpts/yolo_master_n.pt",
+                                    interactive=True
+                                )
+                                validate_btn = gr.Button("✅ Validate Path", size="sm")
+
+                            # Advanced Parameters
+                            with gr.Accordion("⚙️ Advanced Parameters", open=True):
+                                conf_slider = gr.Slider(0, 1, 0.25, step=0.01, label="Confidence (Conf)")
+                                iou_slider = gr.Slider(0, 1, 0.7, step=0.01, label="IoU Threshold")
+
+                                with gr.Row():
+                                    max_det_num = gr.Number(300, label="Max Objects", precision=0)
+                                    line_width_num = gr.Number(0, label="Line Width", precision=0)
+
+                                with gr.Row():
+                                    device_txt = gr.Textbox("0", label="Device ID (e.g. 0, cpu)", placeholder="0 or cpu")
+                                    cpu_chk = gr.Checkbox(False, label="Force CPU")
+
+                            # Output Options
+                            options_chk = gr.CheckboxGroup(
+                                ["half", "show", "save", "save_txt", "save_crop", "hide_labels", "hide_conf", "agnostic_nms", "retina_masks"],
+                                label="Output Options",
+                                value=[]
                             )
-                            refresh_btn = gr.Button("🔄", scale=1, min_width=10, size="sm")
-                        custom_model_txt = gr.Textbox(
-                            value="",
-                            label="Custom Model Path (file or directory)",
-                            placeholder="./ckpts/yolo_master_n.pt",
-                            interactive=True
-                        )
-                        validate_btn = gr.Button("✅ Validate Path", size="sm")
 
-                    # Advanced Parameters
-                    with gr.Accordion("⚙️ Advanced Parameters", open=True):
-                        conf_slider = gr.Slider(0, 1, 0.25, step=0.01, label="Confidence (Conf)")
-                        iou_slider = gr.Slider(0, 1, 0.7, step=0.01, label="IoU Threshold")
-                        
-                        with gr.Row():
-                            max_det_num = gr.Number(300, label="Max Objects", precision=0)
-                            line_width_num = gr.Number(0, label="Line Width", precision=0)
-                        
-                        with gr.Row():
-                            device_txt = gr.Textbox("0", label="Device ID (e.g. 0, cpu)", placeholder="0 or cpu")
-                            cpu_chk = gr.Checkbox(False, label="Force CPU")
+                            # Run Button
+                            run_btn = gr.Button("🔥 Start Inference", variant="primary", size="lg")
 
-                    # Output Options
-                    options_chk = gr.CheckboxGroup(
-                        ["half", "show", "save", "save_txt", "save_crop", "hide_labels", "hide_conf", "agnostic_nms", "retina_masks"],
-                        label="Output Options",
-                        value=[]
+                        # Main Area: Display Panel
+                        with gr.Column(scale=3):
+                            with gr.Tabs():
+                                with gr.TabItem("🖼️ Visualization"):
+                                    with gr.Row():
+                                        inp_img = gr.Image(type="numpy", label="Input Image", height=500)
+                                        out_img = gr.Image(type="numpy", label="Inference Result", height=500, interactive=False)
+                                    info_md = gr.Markdown(value="Waiting for input...")
+
+                                with gr.TabItem("📊 Data Analysis"):
+                                    gr.Markdown("### Detections Data")
+                                    out_df = gr.Dataframe(
+                                        headers=["Class ID", "Class Name", "Confidence", "x1", "y1", "x2", "y2"],
+                                        label="Raw Detections"
+                                    )
+
+                    # Event Binding for Inference Tab
+                    task_radio.change(fn=self.update_model_dropdown, inputs=task_radio, outputs=model_dd)
+                    refresh_btn.click(fn=self.refresh_models, inputs=task_radio, outputs=model_dd)
+                    validate_btn.click(fn=self.describe_model, inputs=[task_radio, custom_model_txt], outputs=info_md)
+
+                    run_btn.click(
+                        fn=self.inference,
+                        inputs=[
+                            task_radio, inp_img, model_dd, custom_model_txt,
+                            conf_slider, iou_slider, device_txt,
+                            max_det_num, line_width_num, cpu_chk, options_chk
+                        ],
+                        outputs=[out_img, out_df, info_md]
                     )
-                    
-                    # Run Button
-                    run_btn = gr.Button("🔥 Start Inference", variant="primary", size="lg")
 
-                # ================= Main Area: Display Panel =================
-                with gr.Column(scale=3):
+                # ================= NEW: Task Management Tab =================
+                with gr.TabItem("📋 Task Management"):
+                    gr.Markdown("## F1 Studio - Agent Task Management")
+
+                    # System Check Button at the top
+                    with gr.Row():
+                        system_check_btn = gr.Button("🩺 Environment Check", variant="secondary")
+                    system_check_output = gr.Markdown(value="")
+
+                    gr.Markdown("---")
+
+                    # Task Submission Area
                     with gr.Tabs():
-                        with gr.TabItem("🖼️ Visualization"):
+                        # Train Task
+                        with gr.TabItem("🏋️ Train"):
                             with gr.Row():
-                                inp_img = gr.Image(type="numpy", label="Input Image", height=500)
-                                out_img = gr.Image(type="numpy", label="Inference Result", height=500, interactive=False)
-                            info_md = gr.Markdown(value="Waiting for input...")
+                                with gr.Column():
+                                    train_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                    train_data = gr.Textbox(label="Data", value="coco8.yaml", placeholder="coco8.yaml")
+                                with gr.Column():
+                                    train_epochs = gr.Number(label="Epochs", value=1, precision=0)
+                                    train_imgsz = gr.Number(label="Image Size", value=32, precision=0)
+                            train_submit_btn = gr.Button("▶️ Submit Train Task", variant="primary")
+                            train_output = gr.Markdown(value="")
 
-                        with gr.TabItem("📊 Data Analysis"):
-                            gr.Markdown("### Detections Data")
-                            out_df = gr.Dataframe(
-                                headers=["Class ID", "Class Name", "Confidence", "x1", "y1", "x2", "y2"],
-                                label="Raw Detections"
-                            )
+                        # Predict Task
+                        with gr.TabItem("🔍 Predict"):
+                            with gr.Row():
+                                predict_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                predict_source = gr.Textbox(label="Source", value="coco8/images/", placeholder="Path to images")
+                            predict_submit_btn = gr.Button("▶️ Submit Predict Task", variant="primary")
+                            predict_output = gr.Markdown(value="")
 
-            # ================= Event Binding =================
-            
-            # 1. Auto-refresh model list
-            task_radio.change(fn=self.update_model_dropdown, inputs=task_radio, outputs=model_dd)
-            refresh_btn.click(fn=self.refresh_models, inputs=task_radio, outputs=model_dd)
-            validate_btn.click(fn=self.describe_model, inputs=[task_radio, custom_model_txt], outputs=info_md)
-            
-            # 2. Inference Logic
-            run_btn.click(
-                fn=self.inference,
-                inputs=[
-                    task_radio, inp_img, model_dd, custom_model_txt,
-                    conf_slider, iou_slider, device_txt, 
-                    max_det_num, line_width_num, cpu_chk, options_chk
-                ],
-                outputs=[out_img, out_df, info_md]
-            )
+                        # Export Task
+                        with gr.TabItem("📦 Export"):
+                            with gr.Row():
+                                export_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                export_format = gr.Dropdown(
+                                    choices=["onnx", "torchscript", "coreml", "saved_model", "tflite"],
+                                    value="onnx",
+                                    label="Format"
+                                )
+                            export_submit_btn = gr.Button("▶️ Submit Export Task", variant="primary")
+                            export_output = gr.Markdown(value="")
+
+                    gr.Markdown("---")
+
+                    # Task History Area
+                    gr.Markdown("### 📜 Task History")
+                    with gr.Row():
+                        refresh_history_btn = gr.Button("🔄 Refresh History")
+                        clear_history_btn = gr.Button("🗑️ Clear History", variant="stop")
+
+                    history_df = gr.Dataframe(
+                        value=self.load_task_history(),
+                        headers=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
+                        label="Task History"
+                    )
+
+                    # Artifact Viewer
+                    with gr.Row():
+                        artifact_job_id = gr.Textbox(label="Job ID", placeholder="Enter Job ID to view artifacts")
+                        view_artifacts_btn = gr.Button("👁️ View Artifacts")
+                    artifact_output = gr.Markdown(value="")
+
+                    # Event Binding for Task Management Tab
+                    system_check_btn.click(
+                        fn=self.handle_system_check,
+                        outputs=system_check_output
+                    )
+
+                    train_submit_btn.click(
+                        fn=self.handle_train_submit,
+                        inputs=[train_model, train_data, train_epochs, train_imgsz],
+                        outputs=[train_output, history_df]
+                    )
+
+                    predict_submit_btn.click(
+                        fn=self.handle_predict_submit,
+                        inputs=[predict_model, predict_source],
+                        outputs=[predict_output, history_df]
+                    )
+
+                    export_submit_btn.click(
+                        fn=self.handle_export_submit,
+                        inputs=[export_model, export_format],
+                        outputs=[export_output, history_df]
+                    )
+
+                    refresh_history_btn.click(
+                        fn=self.load_task_history,
+                        outputs=history_df
+                    )
+
+                    clear_history_btn.click(
+                        fn=self.clear_history,
+                        outputs=[artifact_output, history_df]
+                    )
+
+                    view_artifacts_btn.click(
+                        fn=self.view_artifacts,
+                        inputs=artifact_job_id,
+                        outputs=artifact_output
+                    )
 
         app.launch(share=False, inbrowser=True)
 
