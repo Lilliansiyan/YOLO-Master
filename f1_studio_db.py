@@ -72,31 +72,61 @@ class F1StudioDB:
         """Scan save_dir for artifacts and categorize them."""
         artifacts = []
 
+        if not save_dir.exists():
+            return artifacts
+
         for file_path in save_dir.rglob("*"):
             if not file_path.is_file():
                 continue
 
             suffix = file_path.suffix.lower()
             rel_path = file_path.relative_to(save_dir)
+            file_name = file_path.name
 
-            # Categorize by extension
+            # Categorize by extension and file name patterns
             if suffix in [".pt", ".pth"]:
                 category = "weight"
-            elif suffix in [".log", ".json", ".txt"]:
-                category = "log"
-            elif suffix in [".csv", ".png", ".jpg", ".jpeg"]:
+                # Prioritize best.pt
+                priority = 0 if file_name == "best.pt" else 1 if file_name == "last.pt" else 2
+            elif suffix in [".csv"]:
                 category = "result"
-            elif suffix in [".onnx", ".torchscript", ".engine"]:
+                priority = 0 if "results" in file_name.lower() else 1
+            elif suffix in [".png", ".jpg", ".jpeg"]:
+                category = "result"
+                # Results images higher priority than prediction outputs
+                priority = 0 if "results" in file_name.lower() else 2
+            elif suffix in [".log"]:
+                category = "log"
+                priority = 1
+            elif suffix in [".json"]:
+                # Manifest and config files are logs
+                category = "log"
+                priority = 0 if "manifest" in file_name.lower() else 1
+            elif suffix in [".txt"]:
+                category = "log"
+                priority = 2
+            elif suffix in [".onnx", ".torchscript", ".engine", ".tflite", ".pb"]:
                 category = "export"
+                priority = 0
+            elif suffix in [".yaml", ".yml"]:
+                category = "config"
+                priority = 1
             else:
                 category = "other"
+                priority = 3
 
             artifacts.append({
                 "path": str(file_path),
                 "rel_path": str(rel_path),
                 "category": category,
-                "size": file_path.stat().st_size
+                "size": file_path.stat().st_size,
+                "priority": priority,
+                "name": file_name
             })
+
+        # Sort by category priority and then by file priority
+        category_order = {"weight": 0, "result": 1, "export": 2, "config": 3, "log": 4, "other": 5}
+        artifacts.sort(key=lambda x: (category_order.get(x["category"], 99), x["priority"], x["name"]))
 
         return artifacts
 

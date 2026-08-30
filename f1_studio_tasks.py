@@ -49,7 +49,7 @@ def validate_request(request: Dict[str, Any]) -> None:
                     validate_path(value)
 
 
-def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], timeout: int = 600) -> Dict[str, Any]:
     """
     Submit a task to the dispatcher and return the result.
 
@@ -57,6 +57,7 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any]) -> D
         skill: Skill name (e.g., "yolo.train", "yolo.predict", "yolo.export")
         inputs: Input parameters (model, data, source, etc.)
         params: Training/inference parameters (epochs, imgsz, conf, etc.)
+        timeout: Task timeout in seconds (default 600 = 10 minutes)
 
     Returns:
         Dict with job_id, status, and full response from dispatcher
@@ -72,7 +73,21 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any]) -> D
     }
 
     # Validate paths
-    validate_request(request)
+    try:
+        validate_request(request)
+    except ValueError as e:
+        response = {
+            "job_id": job_id,
+            "skill": skill,
+            "status": "failed",
+            "error": {
+                "type": "ValidationError",
+                "message": str(e)
+            }
+        }
+        db = F1StudioDB()
+        db.save_job(job_id, skill, response)
+        return response
 
     # Call dispatcher
     dispatcher_path = Path(__file__).parent / "agent" / "scripts" / "run_yolo_master_skill.py"
@@ -82,21 +97,26 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any]) -> D
             ["python3", str(dispatcher_path), "--json", json.dumps(request), "--pretty"],
             capture_output=True,
             text=True,
-            timeout=600  # 10 minute timeout
+            timeout=timeout
         )
 
         # Parse response
         try:
             response = json.loads(result.stdout)
         except json.JSONDecodeError as e:
+            # Try to extract partial output for debugging
+            stdout_preview = result.stdout[:1000] if result.stdout else "(empty)"
+            stderr_preview = result.stderr[:1000] if result.stderr else "(empty)"
+
             response = {
                 "skill": skill,
                 "status": "failed",
                 "error": {
                     "type": "JSONDecodeError",
                     "message": f"Failed to parse dispatcher output: {e}",
-                    "stdout": result.stdout[:500],
-                    "stderr": result.stderr[:500]
+                    "stdout_preview": stdout_preview,
+                    "stderr_preview": stderr_preview,
+                    "return_code": result.returncode
                 }
             }
 
@@ -116,7 +136,21 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any]) -> D
             "status": "timeout",
             "error": {
                 "type": "TimeoutError",
-                "message": "Task execution exceeded 10 minute timeout"
+                "message": f"Task execution exceeded {timeout} second timeout"
+            }
+        }
+        db = F1StudioDB()
+        db.save_job(job_id, skill, response)
+        return response
+
+    except FileNotFoundError as e:
+        response = {
+            "job_id": job_id,
+            "skill": skill,
+            "status": "failed",
+            "error": {
+                "type": "FileNotFoundError",
+                "message": f"Dispatcher not found: {dispatcher_path}. Ensure you're running from YOLO-Master repository root."
             }
         }
         db = F1StudioDB()

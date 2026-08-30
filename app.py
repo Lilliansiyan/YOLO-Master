@@ -312,10 +312,16 @@ class YOLO_Master_WebUI:
 
             if status == "ok":
                 summary = response.get("summary", "")
-                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+                save_dir = response.get("job", {}).get("save_dir", "")
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+            elif status == "timeout":
+                error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
             else:
-                error_msg = response.get("error", {}).get("message", "Unknown error")
-                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+                error = response.get("error", {})
+                error_type = error.get("type", "Unknown")
+                error_msg = error.get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
 
             # Refresh history
             history_df = self.load_task_history()
@@ -332,10 +338,16 @@ class YOLO_Master_WebUI:
 
             if status == "ok":
                 summary = response.get("summary", "")
-                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+                save_dir = response.get("job", {}).get("save_dir", "")
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+            elif status == "timeout":
+                error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
             else:
-                error_msg = response.get("error", {}).get("message", "Unknown error")
-                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+                error = response.get("error", {})
+                error_type = error.get("type", "Unknown")
+                error_msg = error.get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
 
             # Refresh history
             history_df = self.load_task_history()
@@ -352,10 +364,27 @@ class YOLO_Master_WebUI:
 
             if status == "ok":
                 summary = response.get("summary", "")
-                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}"
+                save_dir = response.get("job", {}).get("save_dir", "")
+
+                # For export, also show the exported file info if available
+                export_info = ""
+                if "export" in response:
+                    export_data = response["export"]
+                    if "path" in export_data:
+                        export_info = f"\n\n📦 **Exported File**: `{export_data['path']}`"
+                    if "size" in export_data:
+                        size_mb = export_data["size"] / (1024 * 1024)
+                        export_info += f"\n📏 **Size**: {size_mb:.2f} MB"
+
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`{export_info}"
+            elif status == "timeout":
+                error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
             else:
-                error_msg = response.get("error", {}).get("message", "Unknown error")
-                message = f"❌ **Task {job_id} failed**\n\n{error_msg}"
+                error = response.get("error", {})
+                error_type = error.get("type", "Unknown")
+                error_msg = error.get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
 
             # Refresh history
             history_df = self.load_task_history()
@@ -378,7 +407,7 @@ class YOLO_Master_WebUI:
             return f"❌ **Error running system check**: {str(e)}"
 
     def load_task_history(self) -> pd.DataFrame:
-        """Load task history from database as DataFrame."""
+        """Load task history from database as DataFrame with status indicators."""
         jobs = self.db.load_job_history(limit=50)
 
         if not jobs:
@@ -389,28 +418,36 @@ class YOLO_Master_WebUI:
             artifact_count = len(job.get("artifacts", []))
             artifact_str = f"{artifact_count} files" if artifact_count > 0 else "-"
 
+            # Add status emoji for visual indication
+            status = job["status"]
+            status_display = {
+                "ok": "✅ ok",
+                "failed": "❌ failed",
+                "timeout": "⏱️ timeout"
+            }.get(status, f"⚪ {status}")
+
             rows.append({
                 "Job ID": job["job_id"],
                 "Skill": job["skill"],
-                "Status": job["status"],
+                "Status": status_display,
                 "Submitted At": job["submitted_at"][:19],  # Trim microseconds
                 "Artifacts": artifact_str
             })
 
         return pd.DataFrame(rows)
 
-    def view_artifacts(self, job_id: str) -> str:
-        """View artifacts for a specific job."""
+    def view_artifacts(self, job_id: str) -> Tuple[str, List[str]]:
+        """View artifacts for a specific job and return downloadable files."""
         if not job_id or job_id.strip() == "":
-            return "⚠️ Please enter a Job ID"
+            return "⚠️ Please enter a Job ID", []
 
         job = self.db.get_job(job_id.strip())
         if not job:
-            return f"❌ Job not found: {job_id}"
+            return f"❌ Job not found: {job_id}", []
 
         artifacts = job.get("artifacts", [])
         if not artifacts:
-            return f"ℹ️ No artifacts found for job {job_id}"
+            return f"ℹ️ No artifacts found for job {job_id}", []
 
         # Group by category
         by_category = {}
@@ -420,20 +457,60 @@ class YOLO_Master_WebUI:
                 by_category[cat] = []
             by_category[cat].append(artifact)
 
-        # Format output
-        lines = [f"## Artifacts for {job_id}\n"]
+        # Format output with download paths
+        lines = [f"## 📦 Artifacts for Job: `{job_id}`\n"]
+        lines.append(f"**Status**: {job.get('status', 'unknown')}")
+        lines.append(f"**Skill**: {job.get('skill', 'unknown')}")
 
-        for category in ["weight", "result", "export", "log", "other"]:
+        # Extract save_dir for display
+        response = job.get("response", {})
+        if "job" in response and "save_dir" in response["job"]:
+            lines.append(f"**Save Directory**: `{response['job']['save_dir']}`")
+
+        lines.append("\n---\n")
+
+        # Collect files for download component
+        downloadable_files = []
+
+        for category in ["weight", "result", "export", "config", "log", "other"]:
             if category not in by_category:
                 continue
 
-            lines.append(f"### {category.title()}s")
+            # Use emoji for each category
+            category_emoji = {
+                "weight": "⚖️",
+                "result": "📊",
+                "export": "📦",
+                "config": "⚙️",
+                "log": "📝",
+                "other": "📄"
+            }
+            emoji = category_emoji.get(category, "📄")
+
+            lines.append(f"### {emoji} {category.title()}s ({len(by_category[category])} files)\n")
+
             for artifact in by_category[category]:
                 size_mb = artifact["size"] / (1024 * 1024)
-                lines.append(f"- `{artifact['rel_path']}` ({size_mb:.2f} MB)")
-                lines.append(f"  - Full path: `{artifact['path']}`")
+                name = artifact.get("name", artifact["rel_path"])
 
-        return "\n".join(lines)
+                # Format size appropriately
+                if size_mb >= 1:
+                    size_str = f"{size_mb:.2f} MB"
+                elif artifact["size"] >= 1024:
+                    size_str = f"{artifact['size'] / 1024:.2f} KB"
+                else:
+                    size_str = f"{artifact['size']} bytes"
+
+                lines.append(f"- **{name}** ({size_str})")
+                lines.append(f"  - Path: `{artifact['rel_path']}`")
+
+                # Add to downloadable list (we'll show the first few key files)
+                if category in ["weight", "result", "export"] and len(downloadable_files) < 5:
+                    downloadable_files.append(artifact["path"])
+
+            lines.append("")  # Blank line between categories
+
+        return "\n".join(lines), downloadable_files
 
     def clear_history(self) -> Tuple[str, pd.DataFrame]:
         """Clear all task history."""
@@ -592,10 +669,20 @@ class YOLO_Master_WebUI:
                     )
 
                     # Artifact Viewer
+                    gr.Markdown("### 🔍 Artifact Inspector")
                     with gr.Row():
                         artifact_job_id = gr.Textbox(label="Job ID", placeholder="Enter Job ID to view artifacts")
                         view_artifacts_btn = gr.Button("👁️ View Artifacts")
                     artifact_output = gr.Markdown(value="")
+
+                    # Download section
+                    gr.Markdown("**Quick Downloads** (key files from selected job)")
+                    artifact_files = gr.File(
+                        label="Downloadable Files",
+                        file_count="multiple",
+                        interactive=False,
+                        visible=True
+                    )
 
                     # Event Binding for Task Management Tab
                     system_check_btn.click(
@@ -634,7 +721,7 @@ class YOLO_Master_WebUI:
                     view_artifacts_btn.click(
                         fn=self.view_artifacts,
                         inputs=artifact_job_id,
-                        outputs=artifact_output
+                        outputs=[artifact_output, artifact_files]
                     )
 
         app.launch(share=False, inbrowser=True)
