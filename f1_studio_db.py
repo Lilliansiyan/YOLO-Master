@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
+import pandas as pd
 
 
 class F1StudioDB:
@@ -202,3 +203,93 @@ class F1StudioDB:
         conn.close()
 
         return count
+
+    def get_job_metrics(self, job_id: str) -> Optional[Dict]:
+        """
+        Extract training metrics from a job's results.csv file.
+
+        Args:
+            job_id: The job ID to extract metrics from
+
+        Returns:
+            Dict with keys: job_id, epochs, imgsz, mAP50, mAP50-95, precision, recall, box_loss
+            Returns None if job not found, not a training job, or results.csv missing/malformed
+        """
+        # Get job from database
+        job = self.get_job(job_id)
+        if not job:
+            return None
+
+        # Only training jobs have results.csv
+        if job["skill"] != "yolo.train":
+            return None
+
+        # Check if job was successful
+        if job["status"] != "ok":
+            return None
+
+        # Extract save_dir from response
+        response = job.get("response", {})
+        job_data = response.get("job", {})
+        save_dir = job_data.get("save_dir")
+
+        if not save_dir:
+            return None
+
+        save_dir_path = Path(save_dir)
+        if not save_dir_path.exists():
+            return None
+
+        # Look for results.csv
+        results_csv = save_dir_path / "results.csv"
+        if not results_csv.exists():
+            return None
+
+        try:
+            # Parse results.csv
+            df = pd.read_csv(results_csv)
+
+            # Get last row (final epoch)
+            if len(df) == 0:
+                return None
+
+            last_row = df.iloc[-1]
+
+            # Extract metrics (handle missing columns gracefully)
+            metrics = {
+                "job_id": job_id,
+                "epochs": int(last_row.get("epoch", -1)) + 1,  # epoch is 0-indexed
+                "imgsz": job_data.get("imgsz", -1),  # From job params
+                "mAP50": float(last_row.get("metrics/mAP50(B)", 0.0)),
+                "mAP50-95": float(last_row.get("metrics/mAP50-95(B)", 0.0)),
+                "precision": float(last_row.get("metrics/precision(B)", 0.0)),
+                "recall": float(last_row.get("metrics/recall(B)", 0.0)),
+                "box_loss": float(last_row.get("val/box_loss", 0.0))
+            }
+
+            return metrics
+
+        except Exception as e:
+            # Malformed CSV or parsing error - fail gracefully
+            print(f"Warning: Failed to parse results.csv for {job_id}: {e}")
+            return None
+
+    def get_jobs_for_comparison(self, job_ids: List[str]) -> List[Dict]:
+        """
+        Get metrics for multiple jobs for comparison.
+
+        Args:
+            job_ids: List of job IDs to compare
+
+        Returns:
+            List of dicts with job metadata + metrics
+            Filters out jobs where metrics extraction failed
+        """
+        results = []
+
+        for job_id in job_ids:
+            metrics = self.get_job_metrics(job_id)
+            if metrics is not None:
+                results.append(metrics)
+
+        return results
