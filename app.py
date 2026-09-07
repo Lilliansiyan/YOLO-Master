@@ -21,6 +21,7 @@ from f1_studio_tasks import (
     submit_system_check,
     validate_path
 )
+from f1_studio_queue import TaskQueue, ProgressMonitor
 
 # Ignore unnecessary warnings
 warnings.filterwarnings("ignore")
@@ -145,6 +146,8 @@ class YOLO_Master_WebUI:
         self.model_manager = ModelManager(self.ckpts_root)
         self.model_map = self.model_manager.scan_checkpoints()
         self.db = F1StudioDB()  # Initialize F1 Studio database
+        self.task_queue = TaskQueue(self.db, max_workers=2)  # P1: Async queue
+        self.task_queue.start()
 
     def inference(self, 
                   task: str, 
@@ -304,25 +307,36 @@ class YOLO_Master_WebUI:
 
     # ==================== F1 Studio Task Management Methods ====================
 
-    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int) -> Tuple[str, pd.DataFrame]:
+    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
         """Handle train task submission."""
         try:
-            response = submit_train(model, data, int(epochs), int(imgsz))
-            job_id = response.get("job_id", "unknown")
-            status = response.get("status", "unknown")
-
-            if status == "ok":
-                summary = response.get("summary", "")
-                save_dir = response.get("job", {}).get("save_dir", "")
-                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
-            elif status == "timeout":
-                error_msg = response.get("error", {}).get("message", "Unknown timeout")
-                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+            if async_mode:
+                # P1: Submit to async queue
+                job_id = self.task_queue.submit(
+                    skill="yolo.train",
+                    inputs={"model": model, "data": data},
+                    params={"epochs": int(epochs), "imgsz": int(imgsz)},
+                    timeout=600
+                )
+                message = f"🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
             else:
-                error = response.get("error", {})
-                error_type = error.get("type", "Unknown")
-                error_msg = error.get("message", "Unknown error")
-                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
+                # P0: Synchronous submission
+                response = submit_train(model, data, int(epochs), int(imgsz))
+                job_id = response.get("job_id", "unknown")
+                status = response.get("status", "unknown")
+
+                if status == "ok":
+                    summary = response.get("summary", "")
+                    save_dir = response.get("job", {}).get("save_dir", "")
+                    message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+                elif status == "timeout":
+                    error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                    message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+                else:
+                    error = response.get("error", {})
+                    error_type = error.get("type", "Unknown")
+                    error_msg = error.get("message", "Unknown error")
+                    message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
 
             # Refresh history
             history_df = self.load_task_history()
@@ -330,25 +344,36 @@ class YOLO_Master_WebUI:
         except Exception as e:
             return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
 
-    def handle_predict_submit(self, model: str, source: str) -> Tuple[str, pd.DataFrame]:
+    def handle_predict_submit(self, model: str, source: str, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
         """Handle predict task submission."""
         try:
-            response = submit_predict(model, source)
-            job_id = response.get("job_id", "unknown")
-            status = response.get("status", "unknown")
-
-            if status == "ok":
-                summary = response.get("summary", "")
-                save_dir = response.get("job", {}).get("save_dir", "")
-                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
-            elif status == "timeout":
-                error_msg = response.get("error", {}).get("message", "Unknown timeout")
-                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+            if async_mode:
+                # P1: Submit to async queue
+                job_id = self.task_queue.submit(
+                    skill="yolo.predict",
+                    inputs={"model": model, "source": source},
+                    params={},
+                    timeout=600
+                )
+                message = f"🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
             else:
-                error = response.get("error", {})
-                error_type = error.get("type", "Unknown")
-                error_msg = error.get("message", "Unknown error")
-                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
+                # P0: Synchronous submission
+                response = submit_predict(model, source)
+                job_id = response.get("job_id", "unknown")
+                status = response.get("status", "unknown")
+
+                if status == "ok":
+                    summary = response.get("summary", "")
+                    save_dir = response.get("job", {}).get("save_dir", "")
+                    message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+                elif status == "timeout":
+                    error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                    message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+                else:
+                    error = response.get("error", {})
+                    error_type = error.get("type", "Unknown")
+                    error_msg = error.get("message", "Unknown error")
+                    message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
 
             # Refresh history
             history_df = self.load_task_history()
@@ -407,6 +432,21 @@ class YOLO_Master_WebUI:
         except Exception as e:
             return f"❌ **Error running system check**: {str(e)}"
 
+    def handle_cancel_task(self, job_id: str) -> Tuple[str, pd.DataFrame]:
+        """Cancel a running task."""
+        if not job_id or job_id.strip() == "":
+            return "⚠️ Please enter a Job ID", self.load_task_history()
+
+        job_id = job_id.strip()
+        success = self.task_queue.cancel(job_id)
+
+        if success:
+            message = f"🛑 **Task {job_id} cancellation requested**\n\nThe task will be cancelled if it hasn't completed yet."
+        else:
+            message = f"⚠️ **Task {job_id} not found or already completed**\n\nOnly running tasks can be cancelled."
+
+        return message, self.load_task_history()
+
     def load_task_history(self) -> pd.DataFrame:
         """Load task history from database as DataFrame with status indicators."""
         jobs = self.db.load_job_history(limit=50)
@@ -424,7 +464,10 @@ class YOLO_Master_WebUI:
             status_display = {
                 "ok": "✅ ok",
                 "failed": "❌ failed",
-                "timeout": "⏱️ timeout"
+                "timeout": "⏱️ timeout",
+                "queued": "🔄 queued",
+                "running": "⚙️ running",
+                "cancelled": "🛑 cancelled"
             }.get(status, f"⚪ {status}")
 
             rows.append({
@@ -622,6 +665,13 @@ class YOLO_Master_WebUI:
                     gr.Markdown("---")
 
                     # Task Submission Area
+                    gr.Markdown("### 🚀 Task Submission")
+
+                    # P1: Async mode toggle
+                    with gr.Row():
+                        async_mode_checkbox = gr.Checkbox(label="⚡ Async Mode (run tasks in background)", value=True)
+                        gr.Markdown("*Enable to submit tasks without blocking. Disable for immediate feedback.*")
+
                     with gr.Tabs():
                         # Train Task
                         with gr.TabItem("🏋️ Train"):
@@ -669,6 +719,13 @@ class YOLO_Master_WebUI:
                         label="Task History"
                     )
 
+                    # P1: Task Control
+                    gr.Markdown("### ⚙️ Task Control")
+                    with gr.Row():
+                        cancel_job_id = gr.Textbox(label="Job ID", placeholder="Enter Job ID to cancel")
+                        cancel_task_btn = gr.Button("🛑 Cancel Task", variant="stop")
+                    cancel_output = gr.Markdown(value="")
+
                     # Artifact Viewer
                     gr.Markdown("### 🔍 Artifact Inspector")
                     with gr.Row():
@@ -693,13 +750,13 @@ class YOLO_Master_WebUI:
 
                     train_submit_btn.click(
                         fn=self.handle_train_submit,
-                        inputs=[train_model, train_data, train_epochs, train_imgsz],
+                        inputs=[train_model, train_data, train_epochs, train_imgsz, async_mode_checkbox],
                         outputs=[train_output, history_df]
                     )
 
                     predict_submit_btn.click(
                         fn=self.handle_predict_submit,
-                        inputs=[predict_model, predict_source],
+                        inputs=[predict_model, predict_source, async_mode_checkbox],
                         outputs=[predict_output, history_df]
                     )
 
@@ -707,6 +764,12 @@ class YOLO_Master_WebUI:
                         fn=self.handle_export_submit,
                         inputs=[export_model, export_format],
                         outputs=[export_output, history_df]
+                    )
+
+                    cancel_task_btn.click(
+                        fn=self.handle_cancel_task,
+                        inputs=[cancel_job_id],
+                        outputs=[cancel_output, history_df]
                     )
 
                     refresh_history_btn.click(
