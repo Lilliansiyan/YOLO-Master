@@ -18,12 +18,18 @@ ALLOWED_PREFIXES = [
     "ckpts/",
     "yolo",
     "coco",
+    "bus.jpg",  # Downloaded test image
+    "https://",  # Allow URLs
 ]
 
 
 def validate_path(path: str) -> None:
     """Validate path against whitelist."""
     if not path:
+        return
+
+    # Allow URLs
+    if path.startswith("http://") or path.startswith("https://"):
         return
 
     # Block directory traversal
