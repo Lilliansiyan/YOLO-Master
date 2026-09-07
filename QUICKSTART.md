@@ -1,5 +1,21 @@
 # F1 Studio 快速启动指南 / Quick Start Guide
 
+## 首次使用 / First Time Setup
+
+### 步骤 1: 安装依赖
+
+```bash
+./install_dependencies.sh
+```
+
+这会自动安装所有需要的包（需要 5-10 分钟）。
+
+### 步骤 2: 启动界面
+
+```bash
+./start_f1_studio.sh
+```
+
 ## 方法 1: 使用启动脚本 (推荐)
 
 ```bash
