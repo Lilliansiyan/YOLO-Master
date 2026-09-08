@@ -447,6 +447,111 @@ class YOLO_Master_WebUI:
 
         return message, self.load_task_history()
 
+    def handle_experiment_comparison(self, selected_job_ids: List[str]) -> Tuple[pd.DataFrame, str]:
+        """
+        Compare multiple training experiments and generate comparison report.
+
+        Args:
+            selected_job_ids: List of job IDs to compare
+
+        Returns:
+            Tuple of (comparison_dataframe, markdown_summary)
+        """
+        # Edge case 1: Check if at least 2 jobs selected
+        if len(selected_job_ids) < 2:
+            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+            warning = "⚠️ **Please select at least 2 jobs to compare**\n\nSelect multiple rows in Task History and click 'Compare Selected Jobs'."
+            return empty_df, warning
+
+        # Get metrics for all selected jobs
+        results = self.db.get_jobs_for_comparison(selected_job_ids)
+
+        # Edge case 2: No valid training results found
+        if len(results) == 0:
+            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+            error = "❌ **No valid training results found**\n\nThe selected jobs either:\n- Are not training tasks (predict/export jobs don't have metrics)\n- Don't have results.csv files\n- Have been deleted from disk"
+            return empty_df, error
+
+        # Edge case 3: Some jobs filtered out (non-training or missing metrics)
+        filtered_count = len(selected_job_ids) - len(results)
+        filter_warning = ""
+        if filtered_count > 0:
+            filter_warning = f"\n⚠️ Note: {filtered_count} job(s) were filtered out (non-training or missing results.csv)\n"
+
+        # Build DataFrame
+        rows = []
+        for r in results:
+            rows.append({
+                "Job ID": r["job_id"],
+                "Epochs": r["epochs"],
+                "ImgSz": r["imgsz"],
+                "mAP50": r["mAP50"],
+                "mAP50-95": r["mAP50-95"],
+                "Precision": r["precision"],
+                "Recall": r["recall"],
+                "Loss": r["box_loss"]
+            })
+
+        df = pd.DataFrame(rows)
+
+        # Sort by mAP50 descending (best first)
+        df = df.sort_values("mAP50", ascending=False).reset_index(drop=True)
+
+        # Generate markdown summary
+        best_job = df.iloc[0]
+        best_job_id = best_job["Job ID"]
+        best_mAP50 = best_job["mAP50"]
+
+        summary = f"""## 📊 Experiment Comparison Results
+
+**Best performing model**: {best_job_id} (mAP50: {best_mAP50:.3f})
+**Compared jobs**: {len(results)} training tasks{filter_warning}
+
+### Key Findings:
+"""
+
+        # Generate insights based on data
+        insights = []
+
+        # Insight 1: Epochs impact
+        if len(df) >= 2:
+            epochs_sorted = df.sort_values("Epochs")
+            if len(epochs_sorted) >= 2:
+                min_epoch_row = epochs_sorted.iloc[0]
+                max_epoch_row = epochs_sorted.iloc[-1]
+                if max_epoch_row["Epochs"] > min_epoch_row["Epochs"]:
+                    epoch_diff = max_epoch_row["Epochs"] - min_epoch_row["Epochs"]
+                    mAP_diff = max_epoch_row["mAP50"] - min_epoch_row["mAP50"]
+                    if mAP_diff > 0:
+                        pct_improvement = (mAP_diff / (min_epoch_row["mAP50"] + 0.001)) * 100  # Avoid div by 0
+                        insights.append(f"- Higher epochs ({int(max_epoch_row['Epochs'])}) → +{pct_improvement:.1f}% mAP50 improvement")
+                    elif mAP_diff < 0:
+                        insights.append(f"- More epochs didn't improve performance (possible overfitting)")
+
+        # Insight 2: Image size impact
+        unique_imgsz = df["ImgSz"].unique()
+        if len(unique_imgsz) > 1 and -1 not in unique_imgsz:
+            imgsz_sorted = df.sort_values("ImgSz")
+            if len(imgsz_sorted) >= 2:
+                small_img = imgsz_sorted.iloc[0]
+                large_img = imgsz_sorted.iloc[-1]
+                if large_img["mAP50"] > small_img["mAP50"]:
+                    insights.append(f"- Larger image size ({int(large_img['ImgSz'])}) → better accuracy than {int(small_img['ImgSz'])}")
+
+        # Insight 3: Loss correlation
+        if df["mAP50"].max() > 0:
+            correlation = df[["mAP50", "Loss"]].corr().iloc[0, 1]
+            if correlation < -0.5:
+                insights.append(f"- Lower loss correlates with better mAP50 (correlation: {correlation:.2f})")
+
+        # Add insights to summary
+        if insights:
+            summary += "\n".join(insights)
+        else:
+            summary += "- Results are similar across experiments\n- Consider trying different hyperparameters for more variation"
+
+        return df, summary
+
     def load_task_history(self) -> pd.DataFrame:
         """Load task history from database as DataFrame with status indicators."""
         jobs = self.db.load_job_history(limit=50)
