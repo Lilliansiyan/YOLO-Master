@@ -552,6 +552,29 @@ class YOLO_Master_WebUI:
 
         return df, summary
 
+    def handle_experiment_comparison_from_selection(self, selected_rows: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        """
+        Wrapper method to handle experiment comparison from Gradio selected rows.
+
+        Args:
+            selected_rows: DataFrame of selected rows from Task History
+
+        Returns:
+            Tuple of (comparison_dataframe, markdown_summary)
+        """
+        # Check if any rows selected
+        if selected_rows is None or len(selected_rows) == 0:
+            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+            warning = "⚠️ **No jobs selected**\n\nPlease select rows in Task History by clicking on them, then click 'Compare Selected Jobs'."
+            return empty_df, warning
+
+        # Extract job IDs from selected rows
+        # Gradio returns selected rows as DataFrame with same columns as original
+        job_ids = selected_rows["Job ID"].tolist()
+
+        # Call the main comparison handler
+        return self.handle_experiment_comparison(job_ids)
+
     def load_task_history(self) -> pd.DataFrame:
         """Load task history from database as DataFrame with status indicators."""
         jobs = self.db.load_job_history(limit=50)
@@ -821,8 +844,23 @@ class YOLO_Master_WebUI:
                     history_df = gr.Dataframe(
                         value=self.load_task_history(),
                         headers=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
-                        label="Task History"
+                        label="Task History",
+                        interactive=True  # P1 Task 1.3: Enable row selection
                     )
+
+                    # P1 Task 1.3: Experiment Comparison
+                    gr.Markdown("---")
+                    gr.Markdown("### 📊 Experiment Comparison")
+                    gr.Markdown("💡 **Tip**: Select 2 or more training tasks above to compare their performance metrics")
+                    with gr.Row():
+                        compare_btn = gr.Button("🔬 Compare Selected Jobs", variant="primary")
+                    comparison_output = gr.Markdown(value="")
+                    comparison_table = gr.Dataframe(
+                        value=pd.DataFrame(),
+                        label="Comparison Results"
+                    )
+
+                    gr.Markdown("---")
 
                     # P1: Task Control
                     gr.Markdown("### ⚙️ Task Control")
@@ -885,6 +923,13 @@ class YOLO_Master_WebUI:
                     clear_history_btn.click(
                         fn=self.clear_history,
                         outputs=[artifact_output, history_df]
+                    )
+
+                    # P1 Task 1.3: Experiment comparison event binding
+                    compare_btn.click(
+                        fn=self.handle_experiment_comparison_from_selection,
+                        inputs=history_df,
+                        outputs=[comparison_output, comparison_table]
                     )
 
                     view_artifacts_btn.click(
