@@ -929,7 +929,7 @@ class YOLO_Master_WebUI:
                     compare_btn.click(
                         fn=self.handle_experiment_comparison_from_selection,
                         inputs=history_df,
-                        outputs=[comparison_output, comparison_table]
+                        outputs=[comparison_table, comparison_output]
                     )
 
                     view_artifacts_btn.click(
