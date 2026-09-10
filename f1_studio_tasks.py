@@ -9,6 +9,26 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from f1_studio_db import F1StudioDB
 
+# Tracks running subprocesses by job_id for cancellation support
+_running_processes: Dict[str, subprocess.Popen] = {}
+
+
+def cancel_task(job_id: str) -> bool:
+    """Kill the subprocess for a running task. Returns True if process was found."""
+    proc = _running_processes.get(job_id)
+    if not proc:
+        return False
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    except ProcessLookupError:
+        pass  # Already dead
+    return True
+
 
 # Path whitelist for security
 ALLOWED_PREFIXES = [
@@ -55,7 +75,7 @@ def validate_request(request: Dict[str, Any]) -> None:
                     validate_path(value)
 
 
-def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], timeout: int = 600) -> Dict[str, Any]:
+def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], timeout: int = 600, job_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Submit a task to the dispatcher and return the result.
 
@@ -68,8 +88,9 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
     Returns:
         Dict with job_id, status, and full response from dispatcher
     """
-    # Generate job ID
-    job_id = f"{skill.split('.')[-1]}-{uuid.uuid4().hex[:8]}"
+    # Generate job ID if not provided by caller
+    if job_id is None:
+        job_id = f"{skill.split('.')[-1]}-{uuid.uuid4().hex[:8]}"
 
     # Validate timeout
     if timeout < 60 or timeout > 7200:
@@ -114,18 +135,60 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
     dispatcher_path = Path(__file__).parent / "agent" / "scripts" / "run_yolo_master_skill.py"
 
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             ["python3", str(dispatcher_path), "--json", json.dumps(request), "--pretty"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout
         )
+        _running_processes[job_id] = proc
+
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            _running_processes.pop(job_id, None)
+            response = {
+                "job_id": job_id,
+                "skill": skill,
+                "status": "timeout",
+                "error": {
+                    "type": "TimeoutError",
+                    "message": f"Task execution exceeded {timeout} second timeout"
+                }
+            }
+            db = F1StudioDB()
+            db.save_job(job_id, skill, response)
+            return response
+        finally:
+            _running_processes.pop(job_id, None)
+
+        # Check if process was cancelled (non-zero exit after terminate)
+        if proc.returncode == -15 or proc.returncode == -9:
+            response = {
+                "job_id": job_id,
+                "skill": skill,
+                "status": "cancelled",
+                "error": {
+                    "type": "Cancelled",
+                    "message": "Task was cancelled by user"
+                }
+            }
+            db = F1StudioDB()
+            db.save_job(job_id, skill, response)
+            return response
+
+        # Build a mock result object for compatibility
+        class _Result:
+            def __init__(self, out, err, code):
+                self.stdout, self.stderr, self.returncode = out, err, code
+        result = _Result(stdout, stderr, proc.returncode)
 
         # Parse response
         try:
             response = json.loads(result.stdout)
         except json.JSONDecodeError as e:
-            # Try to extract partial output for debugging
             stdout_preview = result.stdout[:1000] if result.stdout else "(empty)"
             stderr_preview = result.stderr[:1000] if result.stderr else "(empty)"
 
@@ -148,20 +211,6 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
         db = F1StudioDB()
         db.save_job(job_id, skill, response)
 
-        return response
-
-    except subprocess.TimeoutExpired:
-        response = {
-            "job_id": job_id,
-            "skill": skill,
-            "status": "timeout",
-            "error": {
-                "type": "TimeoutError",
-                "message": f"Task execution exceeded {timeout} second timeout"
-            }
-        }
-        db = F1StudioDB()
-        db.save_job(job_id, skill, response)
         return response
 
     except FileNotFoundError as e:

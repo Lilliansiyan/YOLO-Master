@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 import json
 
-from f1_studio_tasks import submit_task
+from f1_studio_tasks import submit_task, cancel_task as kill_process
 from f1_studio_db import F1StudioDB
 
 
@@ -116,7 +116,10 @@ class TaskQueue:
                 return False
             task.cancel_requested = True
             task.status = "cancelled"
-            return True
+
+        # Kill the running subprocess if it exists
+        kill_process(job_id)
+        return True
 
     def get_status(self, job_id: str) -> Optional[str]:
         """Get current status of a task."""
@@ -168,7 +171,8 @@ class TaskQueue:
                 skill=task.skill,
                 inputs=task.inputs,
                 params=task.params,
-                timeout=task.timeout
+                timeout=task.timeout,
+                job_id=task.job_id,
             )
 
             # Check for cancellation after execution (edge case)
