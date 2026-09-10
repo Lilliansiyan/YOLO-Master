@@ -625,26 +625,17 @@ class YOLO_Master_WebUI:
         return df, summary
 
     def handle_experiment_comparison_from_selection(self, selected_rows: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
-        """
-        Wrapper method to handle experiment comparison from Gradio selected rows.
+        empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
 
-        Args:
-            selected_rows: DataFrame of selected rows from Task History
-
-        Returns:
-            Tuple of (comparison_dataframe, markdown_summary)
-        """
-        # Check if any rows selected
         if selected_rows is None or len(selected_rows) == 0:
-            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
-            warning = "⚠️ **No jobs selected**\n\nPlease select rows in Task History by clicking on them, then click 'Compare Selected Jobs'."
-            return empty_df, warning
+            return empty_df, "⚠️ **No jobs selected**\n\nCheck the ✓ box next to jobs you want to compare, then click 'Compare Selected Jobs'."
 
-        # Extract job IDs from selected rows
-        # Gradio returns selected rows as DataFrame with same columns as original
-        job_ids = selected_rows["Job ID"].tolist()
+        # Filter rows where Select checkbox is True
+        checked = selected_rows[selected_rows["Select"] == True]
+        if len(checked) == 0:
+            return empty_df, "⚠️ **No jobs checked**\n\nTick the ✓ checkbox next to at least 2 training jobs."
 
-        # Call the main comparison handler
+        job_ids = checked["Job ID"].tolist()
         return self.handle_experiment_comparison(job_ids)
 
     def load_task_history(self) -> pd.DataFrame:
@@ -652,7 +643,7 @@ class YOLO_Master_WebUI:
         jobs = self.db.load_job_history(limit=50)
 
         if not jobs:
-            return pd.DataFrame(columns=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
+            return pd.DataFrame(columns=["Select", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
 
         rows = []
         for job in jobs:
@@ -671,10 +662,11 @@ class YOLO_Master_WebUI:
             }.get(status, f"⚪ {status}")
 
             rows.append({
+                "Select": False,
                 "Job ID": job["job_id"],
                 "Skill": job["skill"],
                 "Status": status_display,
-                "Submitted At": job["submitted_at"][:19],  # Trim microseconds
+                "Submitted At": job["submitted_at"][:19],
                 "Artifacts": artifact_str
             })
 
@@ -966,9 +958,10 @@ class YOLO_Master_WebUI:
 
                     history_df = gr.Dataframe(
                         value=self.load_task_history(),
-                        headers=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
-                        label="Task History",
-                        interactive=True  # P1 Task 1.3: Enable row selection
+                        headers=["Compare", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
+                        datatype=["bool", "str", "str", "str", "str", "str"],
+                        label="Task History (check ✓ to compare)",
+                        interactive=True
                     )
 
                     # P1 Task 1.3: Experiment Comparison
