@@ -958,7 +958,7 @@ class YOLO_Master_WebUI:
 
                     history_df = gr.Dataframe(
                         value=self.load_task_history(),
-                        headers=["Compare", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
+                        headers=["Select", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
                         datatype=["bool", "str", "str", "str", "str", "str"],
                         label="Task History (check ✓ to compare)",
                         interactive=True
