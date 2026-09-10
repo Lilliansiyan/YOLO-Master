@@ -499,7 +499,7 @@ class YOLO_Master_WebUI:
         """Auto-fill Job ID fields when a row is clicked in Task History."""
         try:
             row_idx = evt.index[0]
-            job_id = str(df.iloc[row_idx, 0])
+            job_id = str(df.iloc[row_idx, 1])  # col 1 = Job ID (col 0 is now Compare checkbox)
             return job_id, job_id
         except Exception:
             return "", ""
