@@ -307,21 +307,27 @@ class YOLO_Master_WebUI:
 
     # ==================== F1 Studio Task Management Methods ====================
 
-    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
+    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int, timeout: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
         """Handle train task submission."""
         try:
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
             if async_mode:
                 # P1: Submit to async queue
                 job_id = self.task_queue.submit(
                     skill="yolo.train",
                     inputs={"model": model, "data": data},
                     params={"epochs": int(epochs), "imgsz": int(imgsz)},
-                    timeout=600
+                    timeout=int(timeout)
                 )
                 message = f"🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
             else:
                 # P0: Synchronous submission
-                response = submit_train(model, data, int(epochs), int(imgsz))
+                response = submit_train(model, data, int(epochs), int(imgsz), timeout=int(timeout))
                 job_id = response.get("job_id", "unknown")
                 status = response.get("status", "unknown")
 
@@ -344,28 +350,64 @@ class YOLO_Master_WebUI:
         except Exception as e:
             return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
 
-    def handle_predict_submit(self, model: str, source: str, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
+    def handle_predict_submit(self, batch_mode: str, model: str, source: str, timeout: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
         """Handle predict task submission."""
         try:
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
+            # P1.2: Validate source based on batch mode
+            from pathlib import Path
+
+            # Skip validation for URLs
+            if not (source.startswith("http://") or source.startswith("https://")):
+                source_path = Path(source)
+
+                if batch_mode == "Directory (Batch)":
+                    # Must be a directory
+                    if not source_path.exists():
+                        return f"❌ **Directory not found**: {source}", pd.DataFrame()
+                    if not source_path.is_dir():
+                        return f"❌ **Path is not a directory**: {source}\n\nPlease select 'Single File/URL' mode for files.", pd.DataFrame()
+
+                    # Check if directory is empty
+                    files = list(source_path.glob("*"))
+                    if len(files) == 0:
+                        return f"⚠️ **Directory is empty**: {source}", pd.DataFrame()
+
+                    # Info message about batch mode
+                    message_prefix = f"📁 **Batch mode**: Processing directory with {len(files)} files\n\n"
+                else:
+                    # Single mode: prefer file or URL
+                    if source_path.exists() and source_path.is_dir():
+                        return f"⚠️ **Path is a directory**: {source}\n\nPlease select 'Directory (Batch)' mode for batch processing.", pd.DataFrame()
+                    message_prefix = ""
+
+            else:
+                message_prefix = ""
+
             if async_mode:
                 # P1: Submit to async queue
                 job_id = self.task_queue.submit(
                     skill="yolo.predict",
                     inputs={"model": model, "source": source},
                     params={},
-                    timeout=600
+                    timeout=int(timeout)
                 )
-                message = f"🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
+                message = f"{message_prefix}🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
             else:
                 # P0: Synchronous submission
-                response = submit_predict(model, source)
+                response = submit_predict(model, source, timeout=int(timeout))
                 job_id = response.get("job_id", "unknown")
                 status = response.get("status", "unknown")
 
                 if status == "ok":
                     summary = response.get("summary", "")
                     save_dir = response.get("job", {}).get("save_dir", "")
-                    message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+                    message = f"{message_prefix}✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
                 elif status == "timeout":
                     error_msg = response.get("error", {}).get("message", "Unknown timeout")
                     message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
@@ -381,10 +423,16 @@ class YOLO_Master_WebUI:
         except Exception as e:
             return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
 
-    def handle_export_submit(self, model: str, format: str) -> Tuple[str, pd.DataFrame]:
+    def handle_export_submit(self, model: str, format: str, timeout: int) -> Tuple[str, pd.DataFrame]:
         """Handle export task submission."""
         try:
-            response = submit_export(model, format)
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
+            response = submit_export(model, format, timeout=int(timeout))
             job_id = response.get("job_id", "unknown")
             status = response.get("status", "unknown")
 
@@ -810,14 +858,46 @@ class YOLO_Master_WebUI:
                                 with gr.Column():
                                     train_epochs = gr.Number(label="Epochs", value=1, precision=0)
                                     train_imgsz = gr.Number(label="Image Size", value=32, precision=0)
+
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                train_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=1800,  # 30 minutes for training
+                                    precision=0,
+                                    info="Maximum execution time. Training jobs typically need more time."
+                                )
+
                             train_submit_btn = gr.Button("▶️ Submit Train Task", variant="primary")
                             train_output = gr.Markdown(value="")
 
                         # Predict Task
                         with gr.TabItem("🔍 Predict"):
+                            # P1.2: Batch mode selection
+                            batch_mode = gr.Radio(
+                                choices=["Single File/URL", "Directory (Batch)"],
+                                value="Single File/URL",
+                                label="Mode",
+                                info="Single: one image/video/URL. Batch: process all files in a directory"
+                            )
+
                             with gr.Row():
                                 predict_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
-                                predict_source = gr.Textbox(label="Source", value="coco8/images/", placeholder="Path to images")
+                                predict_source = gr.Textbox(
+                                    label="Source",
+                                    value="coco8/images/",
+                                    placeholder="Path to image, video, URL, or directory"
+                                )
+
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                predict_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=600,  # 10 minutes
+                                    precision=0,
+                                    info="Maximum execution time. Task will be cancelled if exceeded."
+                                )
+
                             predict_submit_btn = gr.Button("▶️ Submit Predict Task", variant="primary")
                             predict_output = gr.Markdown(value="")
 
@@ -830,6 +910,16 @@ class YOLO_Master_WebUI:
                                     value="onnx",
                                     label="Format"
                                 )
+
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                export_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=600,  # 10 minutes
+                                    precision=0,
+                                    info="Maximum execution time for model export."
+                                )
+
                             export_submit_btn = gr.Button("▶️ Submit Export Task", variant="primary")
                             export_output = gr.Markdown(value="")
 
@@ -893,19 +983,19 @@ class YOLO_Master_WebUI:
 
                     train_submit_btn.click(
                         fn=self.handle_train_submit,
-                        inputs=[train_model, train_data, train_epochs, train_imgsz, async_mode_checkbox],
+                        inputs=[train_model, train_data, train_epochs, train_imgsz, train_timeout, async_mode_checkbox],
                         outputs=[train_output, history_df]
                     )
 
                     predict_submit_btn.click(
                         fn=self.handle_predict_submit,
-                        inputs=[predict_model, predict_source, async_mode_checkbox],
+                        inputs=[batch_mode, predict_model, predict_source, predict_timeout, async_mode_checkbox],
                         outputs=[predict_output, history_df]
                     )
 
                     export_submit_btn.click(
                         fn=self.handle_export_submit,
-                        inputs=[export_model, export_format],
+                        inputs=[export_model, export_format, export_timeout],
                         outputs=[export_output, history_df]
                     )
 
