@@ -2,6 +2,7 @@
 F1 Studio Task Submission Layer - Dispatcher interface for task management
 """
 import subprocess
+import sys
 import json
 import uuid
 import time
@@ -51,6 +52,17 @@ def validate_path(path: str) -> None:
     # Allow URLs
     if path.startswith("http://") or path.startswith("https://"):
         return
+
+    # Convert absolute paths under REPO_ROOT to relative
+    import os
+    try:
+        repo_root = str(Path(__file__).resolve().parent)
+        if path.startswith("/"):
+            rel = os.path.relpath(path, repo_root)
+            if not rel.startswith(".."):
+                path = rel
+    except Exception:
+        pass
 
     # Block directory traversal
     if ".." in path or path.startswith("/"):
@@ -136,7 +148,7 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
 
     try:
         proc = subprocess.Popen(
-            ["python3", str(dispatcher_path), "--json", json.dumps(request), "--pretty"],
+            [sys.executable, str(dispatcher_path), "--json", json.dumps(request), "--pretty"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
