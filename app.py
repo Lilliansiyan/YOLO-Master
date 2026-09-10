@@ -754,7 +754,16 @@ class YOLO_Master_WebUI:
 
             lines.append("")  # Blank line between categories
 
-        return "\n".join(lines), downloadable_files
+        best_pt = ""
+        for artifact in artifacts:
+            if artifact.get("name") == "best.pt":
+                try:
+                    best_pt = str(Path(artifact["path"]).relative_to(Path.cwd()))
+                except ValueError:
+                    best_pt = artifact["path"]
+                break
+
+        return "\n".join(lines), downloadable_files, best_pt
 
     def clear_history(self) -> Tuple[str, pd.DataFrame]:
         """Clear all task history."""
@@ -999,6 +1008,11 @@ class YOLO_Master_WebUI:
                         visible=True
                     )
 
+                    best_pt_state = gr.State(value="")
+                    with gr.Row(visible=False) as quick_actions_row:
+                        quick_predict_btn = gr.Button("➡️ Use for Predict", variant="secondary")
+                        quick_export_btn = gr.Button("📦 Export Model", variant="secondary")
+
                     # Event Binding for Task Management Tab
                     system_check_btn.click(
                         fn=self.handle_system_check,
@@ -1055,7 +1069,23 @@ class YOLO_Master_WebUI:
                     view_artifacts_btn.click(
                         fn=self.view_artifacts,
                         inputs=artifact_job_id,
-                        outputs=[artifact_output, artifact_files]
+                        outputs=[artifact_output, artifact_files, best_pt_state]
+                    ).then(
+                        fn=lambda p: gr.update(visible=bool(p)),
+                        inputs=best_pt_state,
+                        outputs=quick_actions_row
+                    )
+
+                    quick_predict_btn.click(
+                        fn=lambda p: p,
+                        inputs=best_pt_state,
+                        outputs=predict_model
+                    )
+
+                    quick_export_btn.click(
+                        fn=lambda p: p,
+                        inputs=best_pt_state,
+                        outputs=export_model
                     )
 
         app.launch(share=False, inbrowser=True)
