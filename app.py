@@ -495,6 +495,15 @@ class YOLO_Master_WebUI:
         except Exception as e:
             return f"❌ **Error running system check**: {str(e)}"
 
+    def on_history_row_select(self, evt: gr.SelectData, df: pd.DataFrame) -> Tuple[str, str]:
+        """Auto-fill Job ID fields when a row is clicked in Task History."""
+        try:
+            row_idx = evt.index[0]
+            job_id = str(df.iloc[row_idx, 0])
+            return job_id, job_id
+        except Exception:
+            return "", ""
+
     def handle_cancel_task(self, job_id: str) -> Tuple[str, pd.DataFrame]:
         """Cancel a running task."""
         if not job_id or job_id.strip() == "":
@@ -1035,6 +1044,12 @@ class YOLO_Master_WebUI:
                         fn=self.handle_experiment_comparison_from_selection,
                         inputs=history_df,
                         outputs=[comparison_table, comparison_output]
+                    )
+
+                    history_df.select(
+                        fn=self.on_history_row_select,
+                        inputs=history_df,
+                        outputs=[cancel_job_id, artifact_job_id]
                     )
 
                     view_artifacts_btn.click(
