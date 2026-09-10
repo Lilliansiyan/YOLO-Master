@@ -71,6 +71,21 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
     # Generate job ID
     job_id = f"{skill.split('.')[-1]}-{uuid.uuid4().hex[:8]}"
 
+    # Validate timeout
+    if timeout < 60 or timeout > 7200:
+        response = {
+            "job_id": job_id,
+            "skill": skill,
+            "status": "failed",
+            "error": {
+                "type": "ValidationError",
+                "message": f"Timeout must be between 60 and 7200 seconds, got {timeout}"
+            }
+        }
+        db = F1StudioDB()
+        db.save_job(job_id, skill, response)
+        return response
+
     # Build request
     request = {
         "skill": skill,
@@ -178,25 +193,25 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
         return response
 
 
-def submit_train(model: str, data: str, epochs: int, imgsz: int, **kwargs) -> Dict[str, Any]:
+def submit_train(model: str, data: str, epochs: int, imgsz: int, timeout: int = 600, **kwargs) -> Dict[str, Any]:
     """Submit a training task."""
     inputs = {"model": model, "data": data}
     params = {"epochs": epochs, "imgsz": imgsz, **kwargs}
-    return submit_task("yolo.train", inputs, params)
+    return submit_task("yolo.train", inputs, params, timeout=timeout)
 
 
-def submit_predict(model: str, source: str, **kwargs) -> Dict[str, Any]:
+def submit_predict(model: str, source: str, timeout: int = 600, **kwargs) -> Dict[str, Any]:
     """Submit a prediction task."""
     inputs = {"model": model, "source": source}
     params = kwargs
-    return submit_task("yolo.predict", inputs, params)
+    return submit_task("yolo.predict", inputs, params, timeout=timeout)
 
 
-def submit_export(model: str, format: str, **kwargs) -> Dict[str, Any]:
+def submit_export(model: str, format: str, timeout: int = 600, **kwargs) -> Dict[str, Any]:
     """Submit an export task."""
     inputs = {"model": model}
     params = {"format": format, **kwargs}
-    return submit_task("yolo.export", inputs, params)
+    return submit_task("yolo.export", inputs, params, timeout=timeout)
 
 
 def submit_system_check() -> Dict[str, Any]:
