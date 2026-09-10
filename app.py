@@ -373,13 +373,28 @@ class YOLO_Master_WebUI:
                     if not source_path.is_dir():
                         return f"❌ **Path is not a directory**: {source}\n\nPlease select 'Single File/URL' mode for files.", pd.DataFrame()
 
-                    # Check if directory is empty
-                    files = list(source_path.glob("*"))
-                    if len(files) == 0:
-                        return f"⚠️ **Directory is empty**: {source}", pd.DataFrame()
+                    # Check for image files directly in directory (YOLO doesn't recurse subdirs)
+                    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+                    direct_images = [f for f in source_path.glob("*") if f.suffix.lower() in IMAGE_EXTS]
+
+                    if len(direct_images) == 0:
+                        # Check if images exist in subdirectories
+                        nested_images = [f for f in source_path.rglob("*") if f.suffix.lower() in IMAGE_EXTS]
+                        if len(nested_images) > 0:
+                            # Find the subdirs that have images
+                            subdirs = sorted({f.parent.relative_to(source_path) for f in nested_images})
+                            subdir_hints = ", ".join(f"`{source}/{d}`" for d in list(subdirs)[:3])
+                            return (
+                                f"⚠️ **No images directly in `{source}`** — YOLO does not recurse into subdirectories.\n\n"
+                                f"Found {len(nested_images)} image(s) in subdirectories. Please specify one directly, e.g.:\n\n"
+                                f"{subdir_hints}",
+                                pd.DataFrame()
+                            )
+                        else:
+                            return f"⚠️ **No images found in `{source}`** (supported: jpg, png, bmp, tiff, webp)", pd.DataFrame()
 
                     # Info message about batch mode
-                    message_prefix = f"📁 **Batch mode**: Processing directory with {len(files)} files\n\n"
+                    message_prefix = f"📁 **Batch mode**: Processing {len(direct_images)} image(s) in `{source}`\n\n"
                 else:
                     # Single mode: prefer file or URL
                     if source_path.exists() and source_path.is_dir():
