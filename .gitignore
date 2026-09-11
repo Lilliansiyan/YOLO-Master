@@ -30,3 +30,7 @@ agent/logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# F1 Studio frontend (Node)
+frontend/node_modules/
+frontend/dist/
