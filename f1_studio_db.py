@@ -21,6 +21,8 @@ class F1StudioDB:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
 
+        cursor.execute("PRAGMA journal_mode=WAL")
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS jobs (
                 job_id TEXT PRIMARY KEY,
@@ -138,7 +140,7 @@ class F1StudioDB:
 
         return artifacts
 
-    def load_job_history(self, limit: int = 100) -> List[Dict]:
+    def load_job_history(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """Load job history from database."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -147,8 +149,8 @@ class F1StudioDB:
             SELECT job_id, skill, status, submitted_at, finished_at, artifacts_json, error_message
             FROM jobs
             ORDER BY submitted_at DESC
-            LIMIT ?
-        """, (limit,))
+            LIMIT ? OFFSET ?
+        """, (limit, offset))
 
         rows = cursor.fetchall()
         conn.close()
