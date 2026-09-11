@@ -17,9 +17,7 @@ f1_studio.db
 # YOLO outputs
 runs/
 datasets/
-*.jpg
-*.png
-*.pt
+runs/**/*.pt
 coco8
 
 # Logs
