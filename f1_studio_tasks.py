@@ -162,7 +162,10 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                proc.kill()
             proc.wait()
             _running_processes.pop(job_id, None)
             response = {

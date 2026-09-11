@@ -34,12 +34,14 @@ def setup_test_jobs(db: F1StudioDB, temp_dir: Path):
         save_dir.mkdir()
         create_mock_results_csv_with_epochs(save_dir, mAP50, mAP50_95, precision, recall, loss, csv_rows)
 
+        # Write args.yaml matching real ultralytics output (imgsz/epochs live here, not in dispatcher response)
+        args_yaml = save_dir / "args.yaml"
+        args_yaml.write_text(f"imgsz: {imgsz}\nepochs: {epochs}\n")
+
         response = {
             "status": "ok",
             "job": {
                 "save_dir": str(save_dir),
-                "imgsz": imgsz,
-                "epochs": epochs
             }
         }
         db.save_job(job_id, "yolo.train", response)
@@ -101,6 +103,12 @@ def test_comparison_basic():
         # Verify sorting (best mAP50 first)
         assert df.iloc[0]["mAP50"] >= df.iloc[1]["mAP50"], "Should be sorted by mAP50 descending"
         assert df.iloc[1]["mAP50"] >= df.iloc[2]["mAP50"], "Should be sorted by mAP50 descending"
+
+        # ImgSz column must be real values read from args.yaml, not -1
+        assert all(df["ImgSz"] != -1), f"ImgSz should not be -1, got: {df['ImgSz'].tolist()}"
+        assert df[df["Job ID"] == "train-test-001"]["ImgSz"].iloc[0] == 32
+        assert df[df["Job ID"] == "train-test-002"]["ImgSz"].iloc[0] == 32
+        assert df[df["Job ID"] == "train-test-003"]["ImgSz"].iloc[0] == 32
 
         # Best job should be train-test-003 (mAP50=0.780)
         best_job = df.iloc[0]["Job ID"]
