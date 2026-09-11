@@ -244,6 +244,8 @@ class ProgressMonitor:
     """
     Monitors progress.jsonl file for real-time updates.
     """
+    # NOTE: No production writer exists for this file; get_updates() always returns [] in real usage.
+    # To enable real-time progress, wire a ultralytics callback or Popen stdout parser to write here.
 
     def __init__(self, progress_file: Path):
         self.progress_file = progress_file
