@@ -137,3 +137,28 @@ def test_metrics_not_a_train_job_404(client):
     job_id = resp.json()["job_id"]
     resp = c.get(f"/api/tasks/{job_id}/metrics")
     assert resp.status_code == 404
+
+
+def test_system_check_submission_returns_queued_immediately(client):
+    c, mock_submit = client
+    resp = c.post("/api/tasks/system-check")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert body["job_id"].startswith("syscheck-")
+    assert "submitted_at" in body
+    mock_submit.assert_called_once()
+    args = mock_submit.call_args.args
+    assert args[0] == "yolo.system"
+    assert args[1] == {}
+    assert args[2] == {}
+
+
+def test_system_check_job_visible_in_list(client):
+    c, _ = client
+    c.post("/api/tasks/system-check")
+    resp = c.get("/api/tasks")
+    assert resp.status_code == 200
+    jobs = resp.json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["skill"] == "yolo.system"

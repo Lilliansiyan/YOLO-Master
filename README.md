@@ -747,3 +747,48 @@ F1 Studio is a Gradio-based UI for YOLO training, inference, and model compariso
 - [Quickstart](docs/f1-studio/QUICKSTART.md)
 - [P1: Async Task Queue](docs/f1-studio/F1_STUDIO_P1_README.md)
 - [Overview](docs/f1-studio/F1_STUDIO_README.md)
+
+### F1 Studio REST API + React UI
+
+A FastAPI backend and React frontend are available for programmatic task submission and monitoring.
+
+**Start the API server:**
+
+```bash
+# from the repo root, inside your virtualenv
+uvicorn api:app --reload --port 8000
+```
+
+**Start the React dev UI** (separate terminal):
+
+```bash
+cd frontend
+npm install          # first time only
+npm run dev          # starts at http://localhost:5173
+```
+
+The Vite dev server proxies `/api/*` to `http://localhost:8000`, so no CORS configuration is needed during development.
+
+**Key endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/health` | Liveness check |
+| `POST` | `/api/tasks/train` | Submit a training job (202) |
+| `POST` | `/api/tasks/predict` | Submit an inference job (202) |
+| `POST` | `/api/tasks/export` | Submit a model export job (202) |
+| `POST` | `/api/tasks/system-check` | Run a YOLO system health check (202) |
+| `GET` | `/api/tasks` | List jobs (`?limit=50&offset=0`) |
+| `GET` | `/api/tasks/{job_id}` | Get job status and response |
+| `GET` | `/api/tasks/{job_id}/metrics` | Training metrics from `results.csv` |
+| `DELETE` | `/api/tasks/{job_id}` | Cancel a running job |
+
+**Run the API tests:**
+
+```bash
+# unit tests (mocked submit_task, isolated SQLite per test)
+python -m pytest test_api.py -v
+
+# integration tests (realistic submit_task side-effects, full lifecycle)
+python -m pytest test_api_integration.py -v
+```

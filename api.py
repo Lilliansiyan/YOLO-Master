@@ -117,6 +117,15 @@ def cancel(job_id: str):
     return {"job_id": job_id, "status": "cancelled"}
 
 
+@app.post("/api/tasks/system-check", status_code=202)
+def system_check(background_tasks: BackgroundTasks):
+    job_id = f"syscheck-{uuid.uuid4().hex[:8]}"
+    submitted_at = datetime.now().isoformat()
+    F1StudioDB().save_job(job_id, "yolo.system", {"status": "queued", "job_id": job_id})
+    background_tasks.add_task(submit_task, "yolo.system", {}, {}, 60, job_id)
+    return {"job_id": job_id, "status": "queued", "submitted_at": submitted_at}
+
+
 @app.get("/api/tasks/{job_id}/metrics")
 def get_task_metrics(job_id: str):
     """Training metrics parsed from results.csv (yolo.train jobs only).
