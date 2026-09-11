@@ -115,3 +115,23 @@ def cancel(job_id: str):
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         raise HTTPException(status_code=409, detail=f"Job {job_id} is already {job['status']}, cannot cancel")
     return {"job_id": job_id, "status": "cancelled"}
+
+
+@app.get("/api/tasks/{job_id}/metrics")
+def get_task_metrics(job_id: str):
+    """Training metrics parsed from results.csv (yolo.train jobs only).
+
+    Separate endpoint rather than folding into GET /api/tasks/{job_id} so the
+    latter's response shape stays stable for existing callers (frontend
+    TaskDetail already depends on it); metrics are opt-in per caller.
+    """
+    metrics = F1StudioDB().get_job_metrics(job_id)
+    if metrics is None:
+        job = F1StudioDB().get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No metrics available for job {job_id} (not a completed yolo.train job)",
+        )
+    return metrics

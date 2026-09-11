@@ -22,6 +22,7 @@ coco8
 # Root-level model weights and sample images (not tracked, not in runs/)
 /*.pt
 /*.jpg
+/*.onnx
 
 # Logs
 agent/logs/

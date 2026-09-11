@@ -12,19 +12,31 @@ function formatBytes(bytes) {
 
 export default function TaskDetail({ jobId }) {
   const [job, setJob] = useState(null)
+  const [metrics, setMetrics] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!jobId) return
 
     let cancelled = false
+    setMetrics(null)
 
     async function load() {
       try {
         const data = await api.getTask(jobId)
-        if (!cancelled) {
-          setJob(data)
-          setError(null)
+        if (cancelled) return
+        setJob(data)
+        setError(null)
+
+        // Metrics only exist for finished yolo.train jobs; a 404 here just
+        // means "not applicable yet", not a real error.
+        if (data.skill === 'yolo.train' && data.status === 'ok') {
+          try {
+            const m = await api.getMetrics(jobId)
+            if (!cancelled) setMetrics(m)
+          } catch (err) {
+            if (!cancelled && err.status !== 404) throw err
+          }
         }
       } catch (err) {
         if (!cancelled) setError(err.message)
@@ -90,6 +102,21 @@ export default function TaskDetail({ jobId }) {
                 ))}
               </tbody>
             </table>
+          )}
+
+          {metrics && (
+            <>
+              <h3>Metrics</h3>
+              <dl>
+                <dt>Epochs</dt><dd>{metrics.epochs}</dd>
+                <dt>Image size</dt><dd>{metrics.imgsz}</dd>
+                <dt>mAP50</dt><dd>{metrics['mAP50'].toFixed(3)}</dd>
+                <dt>mAP50-95</dt><dd>{metrics['mAP50-95'].toFixed(3)}</dd>
+                <dt>Precision</dt><dd>{metrics.precision.toFixed(3)}</dd>
+                <dt>Recall</dt><dd>{metrics.recall.toFixed(3)}</dd>
+                <dt>Box loss</dt><dd>{metrics.box_loss.toFixed(3)}</dd>
+              </dl>
+            </>
           )}
 
           <details>

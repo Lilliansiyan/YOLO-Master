@@ -31,6 +31,10 @@ export const api = {
 
   getTask: (jobId) => request(`/tasks/${encodeURIComponent(jobId)}`),
 
+  // 404 when the job isn't a finished yolo.train job — callers should treat
+  // that as "no metrics yet", not an error.
+  getMetrics: (jobId) => request(`/tasks/${encodeURIComponent(jobId)}/metrics`),
+
   submitTrain: (body) =>
     request('/tasks/train', { method: 'POST', body: JSON.stringify(body) }),
 
