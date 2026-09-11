@@ -60,9 +60,16 @@ class F1StudioDB:
             error_message = response["error"].get("type", "Unknown error")
 
         cursor.execute("""
-            INSERT OR REPLACE INTO jobs
+            INSERT INTO jobs
             (job_id, skill, status, submitted_at, finished_at, response_json, artifacts_json, error_message)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(job_id) DO UPDATE SET
+                skill=excluded.skill,
+                status=excluded.status,
+                finished_at=excluded.finished_at,
+                response_json=excluded.response_json,
+                artifacts_json=excluded.artifacts_json,
+                error_message=excluded.error_message
         """, (job_id, skill, status, datetime.now().isoformat(), finished_at,
               response_json, artifacts_json, error_message))
 
@@ -256,10 +263,22 @@ class F1StudioDB:
             last_row = df.iloc[-1]
 
             # Extract metrics (handle missing columns gracefully)
+            # Read imgsz from args.yaml — dispatcher response doesn't include it
+            imgsz = -1
+            args_yaml = save_dir_path / "args.yaml"
+            if args_yaml.exists():
+                try:
+                    import yaml
+                    with open(args_yaml) as f:
+                        args = yaml.safe_load(f)
+                        imgsz = args.get("imgsz", -1)
+                except Exception:
+                    pass
+
             metrics = {
                 "job_id": job_id,
                 "epochs": int(last_row.get("epoch", -1)) + 1,  # epoch is 0-indexed
-                "imgsz": job_data.get("imgsz", -1),  # From job params
+                "imgsz": imgsz,
                 "mAP50": float(last_row.get("metrics/mAP50(B)", 0.0)),
                 "mAP50-95": float(last_row.get("metrics/mAP50-95(B)", 0.0)),
                 "precision": float(last_row.get("metrics/precision(B)", 0.0)),

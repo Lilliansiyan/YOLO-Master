@@ -3,6 +3,8 @@ F1 Studio Task Submission Layer - Dispatcher interface for task management
 """
 import subprocess
 import sys
+import os
+import signal
 import json
 import uuid
 import time
@@ -15,19 +17,20 @@ _running_processes: Dict[str, subprocess.Popen] = {}
 
 
 def cancel_task(job_id: str) -> bool:
-    """Kill the subprocess for a running task. Returns True if process was found."""
+    """Kill the process group for a running task. Returns True if process was found."""
     proc = _running_processes.get(job_id)
     if not proc:
         return False
     try:
-        proc.terminate()
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGTERM)
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            os.killpg(pgid, signal.SIGKILL)
             proc.wait()
-    except ProcessLookupError:
-        pass  # Already dead
+    except (ProcessLookupError, OSError):
+        pass
     return True
 
 
@@ -152,6 +155,7 @@ def submit_task(skill: str, inputs: Dict[str, Any], params: Dict[str, Any], time
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            start_new_session=True,
         )
         _running_processes[job_id] = proc
 

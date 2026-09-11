@@ -117,6 +117,17 @@ class TaskQueue:
             task.cancel_requested = True
             task.status = "cancelled"
 
+        # Persist cancellation to DB immediately (covers queued tasks never picked up by worker)
+        self.db.save_job(
+            job_id=job_id,
+            skill=task.skill,
+            response={
+                "status": "cancelled",
+                "message": "Task was cancelled by user",
+                "cancelled_at": datetime.now().isoformat()
+            }
+        )
+
         # Kill the running subprocess if it exists
         kill_process(job_id)
         return True
@@ -145,6 +156,11 @@ class TaskQueue:
     def _execute_task(self, task: Task):
         """Execute a single task."""
         job_id = task.job_id
+
+        # Check for cancellation before starting (task may have been cancelled while queued)
+        if task.cancel_requested:
+            self._handle_cancellation(task)
+            return
 
         # Update status to running
         with self.lock:
