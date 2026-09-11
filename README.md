@@ -739,3 +739,11 @@ If you use YOLO-Master in your research, please cite our paper:
 ```
 
 ⭐ **If you find this work useful, please star the repository!**
+
+## F1 Studio
+
+F1 Studio is a Gradio-based UI for YOLO training, inference, and model comparison, built on top of the YOLO dispatcher in this repo.
+
+- [Quickstart](docs/f1-studio/QUICKSTART.md)
+- [P1: Async Task Queue](docs/f1-studio/F1_STUDIO_P1_README.md)
+- [Overview](docs/f1-studio/F1_STUDIO_README.md)

@@ -17,8 +17,11 @@ f1_studio.db
 # YOLO outputs
 runs/
 datasets/
-runs/**/*.pt
 coco8
+
+# Root-level model weights and sample images (not tracked, not in runs/)
+/*.pt
+/*.jpg
 
 # Logs
 agent/logs/

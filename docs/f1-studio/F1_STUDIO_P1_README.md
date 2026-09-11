@@ -43,20 +43,21 @@ Job ID: train-abc123
 success = queue.cancel(job_id)
 ```
 
-### 3. 实时进度监控 Real-time Progress Monitoring
+### 3. 进度监控基础设施 Progress Monitor Infrastructure
 
-**特性 Features:**
-- 读取 progress.jsonl 文件 (Reads progress.jsonl files)
-- 增量更新，不重复读取 (Incremental updates, no re-reading)
-- 支持 JSON Lines 格式 (Supports JSON Lines format)
+**状态 Status:** 基础设施已就绪，数据源待接入 (Infrastructure ready, data source not yet wired)
 
-**使用 Usage:**
+`ProgressMonitor` 类已实现并测试，支持读取 `progress.jsonl` 增量事件。但当前无任何代码向该文件写入数据——ultralytics 训练回调尚未接入——所以 `get_updates()` 在实际运行中始终返回空列表。
+
+The `ProgressMonitor` class is implemented and tested, capable of reading incremental events from `progress.jsonl`. However, no production code currently writes to that file — the ultralytics training callback is not yet wired — so `get_updates()` always returns `[]` in real usage.
+
+**接入方式 To enable (P2 work):**
 ```python
-monitor = ProgressMonitor(Path("runs/agent/yolo-train-xxx/progress.jsonl"))
-updates = monitor.get_updates()  # Returns new events only
-
-for event in updates:
-    print(f"Step {event['step']}: {event['message']}")
+# Wire a ultralytics callback to write progress events:
+def on_train_epoch_end(trainer):
+    with open(progress_file, "a") as f:
+        json.dump({"step": trainer.epoch, "message": f"epoch {trainer.epoch}"}, f)
+        f.write("\n")
 ```
 
 ## 架构 Architecture
@@ -160,25 +161,20 @@ def handle_cancel_task(self, job_id):
         return f"⚠️ Task {job_id} not found or already completed"
 ```
 
-### 监控进度 Monitor Progress
+### 监控进度 Monitor Progress (P2)
 
 ```python
+# NOTE: get_updates() returns [] until a progress writer is wired (see P2 roadmap)
 progress_file = Path("runs/agent/yolo-train-xxx/progress.jsonl")
 monitor = ProgressMonitor(progress_file)
-
-# Periodic check (e.g., every 1 second)
-while task_running:
-    updates = monitor.get_updates()
-    for event in updates:
-        print(f"Progress: {event}")
-    time.sleep(1)
+updates = monitor.get_updates()  # currently always []
 ```
 
 ## 性能指标 Performance Metrics
 
 | Metric | P0 (Sync) | P1 (Async) |
 |--------|-----------|------------|
-| Task submission latency | Blocks until done | < 100ms |
+| Task submission latency | Blocks until done | Non-blocking, returns immediately |
 | Concurrent tasks | 1 | 2 |
 | UI responsiveness | Blocked | Responsive |
 | Task cancellation | ❌ Not supported | ✅ Supported |
@@ -243,8 +239,7 @@ job_id = queue.submit(...)
 ### 任务卡在 queued 状态 Task Stuck in Queued
 
 **原因 Cause:**
-- 所有 worker 都在忙 (All workers busy)
-- 队列满了 (Queue full)
+- 所有 worker 都在忙 (All workers busy — queue is unbounded, never "full")
 
 **解决 Solution:**
 - 等待当前任务完成 (Wait for current tasks)
