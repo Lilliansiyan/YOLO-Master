@@ -523,6 +523,7 @@ FOUNDATION_RELATION_MODES = frozenset({"sampled", "full"})
 FOUNDATION_DTYPES = frozenset({"auto", "fp32", "fp16", "bf16"})
 FOUNDATION_TARGET_LEVELS = frozenset({"p3", "p4", "p5"})
 # fmt: on
+CFG_DICT_KEYS = frozenset({"multitask_task_weights"})
 LORA_RUNTIME_METADATA_KEYS = frozenset(
     {
         "effective_lora_backend",
