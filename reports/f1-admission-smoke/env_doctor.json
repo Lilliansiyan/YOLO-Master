@@ -1,0 +1,155 @@
+{
+  "skill": "yolo.system",
+  "status": "ok",
+  "summary": "environment doctor collected",
+  "data": {
+    "environment": {
+      "python": {
+        "executable": "/opt/anaconda3/bin/python",
+        "version": "3.13.9"
+      },
+      "workspace": {
+        "repo_root": "/Users/lilliansun/RhinoBird/YOLO-Master",
+        "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master"
+      },
+      "ultralytics": {
+        "repo_version": "8.4.101",
+        "module_version": "8.4.101",
+        "module_path": "/Users/lilliansun/RhinoBird/YOLO-Master/ultralytics/__init__.py",
+        "local_repo_active": true
+      },
+      "cli": {
+        "available": true,
+        "path": "/opt/anaconda3/bin/yolo",
+        "status": "available",
+        "install": {
+          "status": "available",
+          "path": "/opt/anaconda3/bin/yolo"
+        }
+      },
+      "devices": {
+        "requested": "mps",
+        "selected": "mps",
+        "available": [
+          "mps",
+          "cpu"
+        ],
+        "selection_source": "auto",
+        "torch": {
+          "installed": true,
+          "version": "2.12.0",
+          "cuda": {
+            "available": false,
+            "device_count": 0,
+            "devices": []
+          },
+          "mps": {
+            "built": true,
+            "available": true
+          }
+        }
+      },
+      "runtime": {},
+      "references": {
+        "model": {
+          "requested": null,
+          "resolved": null,
+          "exists": false
+        },
+        "data": {
+          "requested": null,
+          "resolved": null,
+          "exists": false
+        },
+        "source": {
+          "requested": null,
+          "resolved": null,
+          "exists": false
+        }
+      }
+    },
+    "recommendations": []
+  },
+  "environment": {
+    "python": {
+      "executable": "/opt/anaconda3/bin/python",
+      "version": "3.13.9"
+    },
+    "workspace": {
+      "repo_root": "/Users/lilliansun/RhinoBird/YOLO-Master",
+      "cwd": "/Users/lilliansun/RhinoBird/YOLO-Master"
+    },
+    "ultralytics": {
+      "repo_version": "8.4.101",
+      "module_version": "8.4.101",
+      "module_path": "/Users/lilliansun/RhinoBird/YOLO-Master/ultralytics/__init__.py",
+      "local_repo_active": true
+    },
+    "cli": {
+      "available": true,
+      "path": "/opt/anaconda3/bin/yolo",
+      "status": "available",
+      "install": {
+        "status": "available",
+        "path": "/opt/anaconda3/bin/yolo"
+      }
+    },
+    "devices": {
+      "requested": "mps",
+      "selected": "mps",
+      "available": [
+        "mps",
+        "cpu"
+      ],
+      "selection_source": "auto",
+      "torch": {
+        "installed": true,
+        "version": "2.12.0",
+        "cuda": {
+          "available": false,
+          "device_count": 0,
+          "devices": []
+        },
+        "mps": {
+          "built": true,
+          "available": true
+        }
+      }
+    },
+    "runtime": {},
+    "references": {
+      "model": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      },
+      "data": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      },
+      "source": {
+        "requested": null,
+        "resolved": null,
+        "exists": false
+      }
+    }
+  },
+  "recommendations": [],
+  "usage": {
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0
+    },
+    "requests": 0,
+    "records": []
+  },
+  "cost_estimate": {
+    "currency": "USD",
+    "amount": 0.0,
+    "basis": "no token usage"
+  },
+  "request_id": "yolo-system-e56f2d1b",
+  "manifest": "/Users/lilliansun/RhinoBird/YOLO-Master/runs/agent/yolo-system-e56f2d1b/skill_manifest.json"
+}

@@ -359,21 +359,24 @@ MIXTURE_INT_KEYS = frozenset(
         "slice_size",
     }
 )
-CFG_INT_KEYS = frozenset(
-    {  # integer-only arguments
-        "epochs",
-        "patience",
-        "workers",
-        "seed",
-        "close_mosaic",
-        "mask_ratio",
-        "max_det",
-        "vid_stride",
-        "line_width",
-        "nbs",
-        "save_period",
-    }
-) | MIXTURE_INT_KEYS
+CFG_INT_KEYS = (
+    frozenset(
+        {  # integer-only arguments
+            "epochs",
+            "patience",
+            "workers",
+            "seed",
+            "close_mosaic",
+            "mask_ratio",
+            "max_det",
+            "vid_stride",
+            "line_width",
+            "nbs",
+            "save_period",
+        }
+    )
+    | MIXTURE_INT_KEYS
+)
 CFG_INT_MIN = {  # minimum valid values for integer arguments used as divisors, sizes or seeds
     "nbs": 1,
     "max_det": 1,
@@ -520,6 +523,7 @@ FOUNDATION_RELATION_MODES = frozenset({"sampled", "full"})
 FOUNDATION_DTYPES = frozenset({"auto", "fp32", "fp16", "bf16"})
 FOUNDATION_TARGET_LEVELS = frozenset({"p3", "p4", "p5"})
 # fmt: on
+CFG_DICT_KEYS = frozenset({"multitask_task_weights"})
 LORA_RUNTIME_METADATA_KEYS = frozenset(
     {
         "effective_lora_backend",
@@ -664,7 +668,15 @@ def check_cfg(cfg: dict, hard: bool = True) -> None:
         - None values are ignored as they may be from optional arguments.
         - Fraction keys use [0.0, 1.0], except dataset fraction, which uses (0.0, 1.0].
     """
-    typed_keys = CFG_FLOAT_KEYS | CFG_FRACTION_KEYS | CFG_INT_KEYS | CFG_BOOL_KEYS | CFG_STR_KEYS | {"scale", "compile"}
+    typed_keys = (
+        CFG_FLOAT_KEYS
+        | CFG_FRACTION_KEYS
+        | CFG_INT_KEYS
+        | CFG_BOOL_KEYS
+        | CFG_STR_KEYS
+        | CFG_DICT_KEYS
+        | {"scale", "compile"}
+    )
     for k, v in cfg.items():
         if v is None and DEFAULT_CFG_DICT.get(k) is not None and k in typed_keys and k != "auto_augment":
             raise TypeError(f"'{k}=None' is invalid. '{k}' must not be None.")
@@ -731,6 +743,10 @@ def check_cfg(cfg: dict, hard: bool = True) -> None:
                 if hard:
                     raise TypeError(f"'{k}={v}' is of invalid type {type(v).__name__}. '{k}' must be a str.")
                 cfg[k] = str(v)
+            elif k in CFG_DICT_KEYS and not isinstance(v, dict):
+                if hard:
+                    raise TypeError(f"'{k}={v}' is of invalid type {type(v).__name__}. '{k}' must be a dict.")
+                cfg[k] = dict(v)
             elif k == "compile" and not isinstance(v, (bool, str)):  # False=off, True="default", or a mode string
                 if hard:
                     raise TypeError(

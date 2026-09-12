@@ -1,0 +1,9 @@
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 865.2/865.2 kB 100.9 kB/s  0:00:08
+Downloading polars_runtime_32-1.44.0-cp310-abi3-macosx_11_0_arm64.whl (48.6 MB)
+   ━━━━━━━━━━━━━━━━━━╸                      22.5/48.6 MB 71.3 kB/s eta 0:06:06
+WARNING: Connection timed out while downloading.
+WARNING: Attempting to resume incomplete download (22.5 MB/48.6 MB, attempt 1)
+Resuming download polars_runtime_32-1.44.0-cp310-abi3-macosx_11_0_arm64.whl (22.5 MB/48.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.6/48.6 MB 95.4 kB/s  0:04:35
+Downloading ultralytics_thop-2.1.6-py3-none-any.whl (30 kB)
+Building wheels for collected packages: ultralytics

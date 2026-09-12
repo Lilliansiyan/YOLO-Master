@@ -1,5 +1,6 @@
 import os
 import gc
+import json
 import warnings
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
@@ -10,6 +11,17 @@ import pandas as pd
 import cv2
 import torch
 from ultralytics import YOLO
+
+# F1 Studio imports
+from f1_studio_db import F1StudioDB
+from f1_studio_tasks import (
+    submit_train,
+    submit_predict,
+    submit_export,
+    submit_system_check,
+    validate_path
+)
+from f1_studio_queue import TaskQueue, ProgressMonitor
 
 # Ignore unnecessary warnings
 warnings.filterwarnings("ignore")
@@ -133,6 +145,9 @@ class YOLO_Master_WebUI:
         self.ckpts_root = Path(ckpts_root)
         self.model_manager = ModelManager(self.ckpts_root)
         self.model_map = self.model_manager.scan_checkpoints()
+        self.db = F1StudioDB()  # Initialize F1 Studio database
+        self.task_queue = TaskQueue(self.db, max_workers=2)  # P1: Async queue
+        self.task_queue.start()
 
     def inference(self, 
                   task: str, 
@@ -290,95 +305,781 @@ class YOLO_Master_WebUI:
         self.model_map = self.model_manager.scan_checkpoints()
         return self.update_model_dropdown(task)
 
+    # ==================== F1 Studio Task Management Methods ====================
+
+    def handle_train_submit(self, model: str, data: str, epochs: int, imgsz: int, timeout: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
+        """Handle train task submission."""
+        try:
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
+            if async_mode:
+                # P1: Submit to async queue
+                job_id = self.task_queue.submit(
+                    skill="yolo.train",
+                    inputs={"model": model, "data": data},
+                    params={"epochs": int(epochs), "imgsz": int(imgsz)},
+                    timeout=int(timeout)
+                )
+                message = f"🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
+            else:
+                # P0: Synchronous submission
+                response = submit_train(model, data, int(epochs), int(imgsz), timeout=int(timeout))
+                job_id = response.get("job_id", "unknown")
+                status = response.get("status", "unknown")
+
+                if status == "ok":
+                    summary = response.get("summary", "")
+                    save_dir = response.get("job", {}).get("save_dir", "")
+                    message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+                elif status == "timeout":
+                    error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                    message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+                else:
+                    error = response.get("error", {})
+                    error_type = error.get("type", "Unknown")
+                    error_msg = error.get("message", "Unknown error")
+                    message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_predict_submit(self, batch_mode: str, model: str, source: str, timeout: int, async_mode: bool = True) -> Tuple[str, pd.DataFrame]:
+        """Handle predict task submission."""
+        try:
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
+            # P1.2: Validate source based on batch mode
+            from pathlib import Path
+
+            # Skip validation for URLs
+            if not (source.startswith("http://") or source.startswith("https://")):
+                source_path = Path(source)
+
+                if batch_mode == "Directory (Batch)":
+                    # Must be a directory
+                    if not source_path.exists():
+                        return f"❌ **Directory not found**: {source}", pd.DataFrame()
+                    if not source_path.is_dir():
+                        return f"❌ **Path is not a directory**: {source}\n\nPlease select 'Single File/URL' mode for files.", pd.DataFrame()
+
+                    # Check for image files directly in directory (YOLO doesn't recurse subdirs)
+                    IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
+                    direct_images = [f for f in source_path.glob("*") if f.suffix.lower() in IMAGE_EXTS]
+
+                    if len(direct_images) == 0:
+                        # Check if images exist in subdirectories
+                        nested_images = [f for f in source_path.rglob("*") if f.suffix.lower() in IMAGE_EXTS]
+                        if len(nested_images) > 0:
+                            # Find the subdirs that have images
+                            subdirs = sorted({f.parent.relative_to(source_path) for f in nested_images})
+                            subdir_hints = ", ".join(f"`{source}/{d}`" for d in list(subdirs)[:3])
+                            return (
+                                f"⚠️ **No images directly in `{source}`** — YOLO does not recurse into subdirectories.\n\n"
+                                f"Found {len(nested_images)} image(s) in subdirectories. Please specify one directly, e.g.:\n\n"
+                                f"{subdir_hints}",
+                                pd.DataFrame()
+                            )
+                        else:
+                            return f"⚠️ **No images found in `{source}`** (supported: jpg, png, bmp, tiff, webp)", pd.DataFrame()
+
+                    # Info message about batch mode
+                    message_prefix = f"📁 **Batch mode**: Processing {len(direct_images)} image(s) in `{source}`\n\n"
+                else:
+                    # Single mode: prefer file or URL
+                    if source_path.exists() and source_path.is_dir():
+                        return f"⚠️ **Path is a directory**: {source}\n\nPlease select 'Directory (Batch)' mode for batch processing.", pd.DataFrame()
+                    message_prefix = ""
+
+            else:
+                message_prefix = ""
+
+            if async_mode:
+                # P1: Submit to async queue
+                job_id = self.task_queue.submit(
+                    skill="yolo.predict",
+                    inputs={"model": model, "source": source},
+                    params={},
+                    timeout=int(timeout)
+                )
+                message = f"{message_prefix}🔄 **Task {job_id} queued**\n\nThe task is executing in the background. Refresh the history to see updates."
+            else:
+                # P0: Synchronous submission
+                response = submit_predict(model, source, timeout=int(timeout))
+                job_id = response.get("job_id", "unknown")
+                status = response.get("status", "unknown")
+
+                if status == "ok":
+                    summary = response.get("summary", "")
+                    save_dir = response.get("job", {}).get("save_dir", "")
+                    message = f"{message_prefix}✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`"
+                elif status == "timeout":
+                    error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                    message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+                else:
+                    error = response.get("error", {})
+                    error_type = error.get("type", "Unknown")
+                    error_msg = error.get("message", "Unknown error")
+                    message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_export_submit(self, model: str, format: str, timeout: int) -> Tuple[str, pd.DataFrame]:
+        """Handle export task submission."""
+        try:
+            # P1.3: Validate timeout
+            if timeout < 60:
+                return "⚠️ **Timeout must be at least 60 seconds**", pd.DataFrame()
+            if timeout > 7200:
+                return "⚠️ **Timeout too large (max 2 hours / 7200 seconds)**", pd.DataFrame()
+
+            response = submit_export(model, format, timeout=int(timeout))
+            job_id = response.get("job_id", "unknown")
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                summary = response.get("summary", "")
+                save_dir = response.get("job", {}).get("save_dir", "")
+
+                # For export, also show the exported file info if available
+                export_info = ""
+                if "export" in response:
+                    export_data = response["export"]
+                    if "path" in export_data:
+                        export_info = f"\n\n📦 **Exported File**: `{export_data['path']}`"
+                    if "size" in export_data:
+                        size_mb = export_data["size"] / (1024 * 1024)
+                        export_info += f"\n📏 **Size**: {size_mb:.2f} MB"
+
+                message = f"✅ **Task {job_id} completed successfully**\n\n{summary}\n\n📁 **Output**: `{save_dir}`{export_info}"
+            elif status == "timeout":
+                error_msg = response.get("error", {}).get("message", "Unknown timeout")
+                message = f"⏱️ **Task {job_id} timed out**\n\n{error_msg}"
+            else:
+                error = response.get("error", {})
+                error_type = error.get("type", "Unknown")
+                error_msg = error.get("message", "Unknown error")
+                message = f"❌ **Task {job_id} failed**\n\n**Error Type**: {error_type}\n\n**Message**: {error_msg}"
+
+            # Refresh history
+            history_df = self.load_task_history()
+            return message, history_df
+        except Exception as e:
+            return f"❌ **Error submitting task**: {str(e)}", pd.DataFrame()
+
+    def handle_system_check(self) -> str:
+        """Handle system check."""
+        try:
+            response = submit_system_check()
+            status = response.get("status", "unknown")
+
+            if status == "ok":
+                return f"✅ **Environment Check Passed**\n\n```json\n{json.dumps(response, indent=2)}\n```"
+            else:
+                error_msg = response.get("error", {}).get("message", "Unknown error")
+                return f"❌ **Environment Check Failed**\n\n{error_msg}"
+        except Exception as e:
+            return f"❌ **Error running system check**: {str(e)}"
+
+    def on_history_row_select(self, evt: gr.SelectData, df: pd.DataFrame) -> Tuple[str, str]:
+        """Auto-fill Job ID fields when a row is clicked in Task History."""
+        try:
+            row_idx = evt.index[0]
+            job_id = str(df.iloc[row_idx, 1])  # col 1 = Job ID (col 0 is now Compare checkbox)
+            return job_id, job_id
+        except Exception:
+            return "", ""
+
+    def handle_cancel_task(self, job_id: str) -> Tuple[str, pd.DataFrame]:
+        """Cancel a running task."""
+        if not job_id or job_id.strip() == "":
+            return "⚠️ Please enter a Job ID", self.load_task_history()
+
+        job_id = job_id.strip()
+        success = self.task_queue.cancel(job_id)
+
+        if success:
+            message = f"🛑 **Task {job_id} cancellation requested**\n\nThe task will be cancelled if it hasn't completed yet."
+        else:
+            message = f"⚠️ **Task {job_id} not found or already completed**\n\nOnly running tasks can be cancelled."
+
+        return message, self.load_task_history()
+
+    def handle_experiment_comparison(self, selected_job_ids: List[str]) -> Tuple[pd.DataFrame, str]:
+        """
+        Compare multiple training experiments and generate comparison report.
+
+        Args:
+            selected_job_ids: List of job IDs to compare
+
+        Returns:
+            Tuple of (comparison_dataframe, markdown_summary)
+        """
+        # Edge case 1: Check if at least 2 jobs selected
+        if len(selected_job_ids) < 2:
+            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+            warning = "⚠️ **Please select at least 2 jobs to compare**\n\nSelect multiple rows in Task History and click 'Compare Selected Jobs'."
+            return empty_df, warning
+
+        # Get metrics for all selected jobs
+        results = self.db.get_jobs_for_comparison(selected_job_ids)
+
+        # Edge case 2: No valid training results found
+        if len(results) == 0:
+            empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+            error = "❌ **No valid training results found**\n\nThe selected jobs either:\n- Are not training tasks (predict/export jobs don't have metrics)\n- Don't have results.csv files\n- Have been deleted from disk"
+            return empty_df, error
+
+        # Edge case 3: Some jobs filtered out (non-training or missing metrics)
+        filtered_count = len(selected_job_ids) - len(results)
+        filter_warning = ""
+        if filtered_count > 0:
+            filter_warning = f"\n⚠️ Note: {filtered_count} job(s) were filtered out (non-training or missing results.csv)\n"
+
+        # Build DataFrame
+        rows = []
+        for r in results:
+            rows.append({
+                "Job ID": r["job_id"],
+                "Epochs": r["epochs"],
+                "ImgSz": r["imgsz"],
+                "mAP50": r["mAP50"],
+                "mAP50-95": r["mAP50-95"],
+                "Precision": r["precision"],
+                "Recall": r["recall"],
+                "Loss": r["box_loss"]
+            })
+
+        df = pd.DataFrame(rows)
+
+        # Sort by mAP50 descending (best first)
+        df = df.sort_values("mAP50", ascending=False).reset_index(drop=True)
+
+        # Generate markdown summary
+        best_job = df.iloc[0]
+        best_job_id = best_job["Job ID"]
+        best_mAP50 = best_job["mAP50"]
+
+        summary = f"""## 📊 Experiment Comparison Results
+
+**Best performing model**: {best_job_id} (mAP50: {best_mAP50:.3f})
+**Compared jobs**: {len(results)} training tasks{filter_warning}
+
+### Key Findings:
+"""
+
+        # Generate insights based on data
+        insights = []
+
+        # Insight 1: Epochs impact
+        if len(df) >= 2:
+            epochs_sorted = df.sort_values("Epochs")
+            if len(epochs_sorted) >= 2:
+                min_epoch_row = epochs_sorted.iloc[0]
+                max_epoch_row = epochs_sorted.iloc[-1]
+                if max_epoch_row["Epochs"] > min_epoch_row["Epochs"]:
+                    epoch_diff = max_epoch_row["Epochs"] - min_epoch_row["Epochs"]
+                    mAP_diff = max_epoch_row["mAP50"] - min_epoch_row["mAP50"]
+                    if mAP_diff > 0:
+                        pct_improvement = (mAP_diff / (min_epoch_row["mAP50"] + 0.001)) * 100  # Avoid div by 0
+                        insights.append(f"- Higher epochs ({int(max_epoch_row['Epochs'])}) → +{pct_improvement:.1f}% mAP50 improvement")
+                    elif mAP_diff < 0:
+                        insights.append(f"- More epochs didn't improve performance (possible overfitting)")
+
+        # Insight 2: Image size impact
+        unique_imgsz = df["ImgSz"].unique()
+        if len(unique_imgsz) > 1 and -1 not in unique_imgsz:
+            imgsz_sorted = df.sort_values("ImgSz")
+            if len(imgsz_sorted) >= 2:
+                small_img = imgsz_sorted.iloc[0]
+                large_img = imgsz_sorted.iloc[-1]
+                if large_img["mAP50"] > small_img["mAP50"]:
+                    insights.append(f"- Larger image size ({int(large_img['ImgSz'])}) → better accuracy than {int(small_img['ImgSz'])}")
+
+        # Insight 3: Loss correlation
+        if df["mAP50"].max() > 0:
+            correlation = df[["mAP50", "Loss"]].corr().iloc[0, 1]
+            if correlation < -0.5:
+                insights.append(f"- Lower loss correlates with better mAP50 (correlation: {correlation:.2f})")
+
+        # Add insights to summary
+        if insights:
+            summary += "\n".join(insights)
+        else:
+            summary += "- Results are similar across experiments\n- Consider trying different hyperparameters for more variation"
+
+        return df, summary
+
+    def handle_experiment_comparison_from_selection(self, selected_rows: pd.DataFrame) -> Tuple[pd.DataFrame, str]:
+        empty_df = pd.DataFrame(columns=["Job ID", "Epochs", "ImgSz", "mAP50", "mAP50-95", "Precision", "Recall", "Loss"])
+
+        if selected_rows is None or len(selected_rows) == 0:
+            return empty_df, "⚠️ **No jobs selected**\n\nCheck the ✓ box next to jobs you want to compare, then click 'Compare Selected Jobs'."
+
+        # Filter rows where Select checkbox is True
+        checked = selected_rows[selected_rows["Select"] == True]
+        if len(checked) == 0:
+            return empty_df, "⚠️ **No jobs checked**\n\nTick the ✓ checkbox next to at least 2 training jobs."
+
+        job_ids = checked["Job ID"].tolist()
+        return self.handle_experiment_comparison(job_ids)
+
+    def load_task_history(self) -> pd.DataFrame:
+        """Load task history from database as DataFrame with status indicators."""
+        jobs = self.db.load_job_history(limit=50)
+
+        if not jobs:
+            return pd.DataFrame(columns=["Select", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
+
+        rows = []
+        for job in jobs:
+            artifact_count = len(job.get("artifacts", []))
+            artifact_str = f"{artifact_count} files" if artifact_count > 0 else "-"
+
+            # Add status emoji for visual indication
+            status = job["status"]
+            status_display = {
+                "ok": "✅ ok",
+                "failed": "❌ failed",
+                "timeout": "⏱️ timeout",
+                "queued": "🔄 queued",
+                "running": "⚙️ running",
+                "cancelled": "🛑 cancelled"
+            }.get(status, f"⚪ {status}")
+
+            rows.append({
+                "Select": False,
+                "Job ID": job["job_id"],
+                "Skill": job["skill"],
+                "Status": status_display,
+                "Submitted At": job["submitted_at"][:19],
+                "Artifacts": artifact_str
+            })
+
+        return pd.DataFrame(rows)
+
+    def view_artifacts(self, job_id: str) -> Tuple[str, List[str]]:
+        """View artifacts for a specific job and return downloadable files."""
+        if not job_id or job_id.strip() == "":
+            return "⚠️ Please enter a Job ID", []
+
+        job = self.db.get_job(job_id.strip())
+        if not job:
+            return f"❌ Job not found: {job_id}", []
+
+        artifacts = job.get("artifacts", [])
+        if not artifacts:
+            return f"ℹ️ No artifacts found for job {job_id}", []
+
+        # Group by category
+        by_category = {}
+        for artifact in artifacts:
+            cat = artifact["category"]
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(artifact)
+
+        # Format output with download paths
+        lines = [f"## 📦 Artifacts for Job: `{job_id}`\n"]
+        lines.append(f"**Status**: {job.get('status', 'unknown')}")
+        lines.append(f"**Skill**: {job.get('skill', 'unknown')}")
+
+        # Extract save_dir for display
+        response = job.get("response", {})
+        if "job" in response and "save_dir" in response["job"]:
+            lines.append(f"**Save Directory**: `{response['job']['save_dir']}`")
+
+        lines.append("\n---\n")
+
+        # Collect files for download component
+        downloadable_files = []
+
+        for category in ["weight", "result", "export", "config", "log", "other"]:
+            if category not in by_category:
+                continue
+
+            # Use emoji for each category
+            category_emoji = {
+                "weight": "⚖️",
+                "result": "📊",
+                "export": "📦",
+                "config": "⚙️",
+                "log": "📝",
+                "other": "📄"
+            }
+            emoji = category_emoji.get(category, "📄")
+
+            lines.append(f"### {emoji} {category.title()}s ({len(by_category[category])} files)\n")
+
+            for artifact in by_category[category]:
+                size_mb = artifact["size"] / (1024 * 1024)
+                name = artifact.get("name", artifact["rel_path"])
+
+                # Format size appropriately
+                if size_mb >= 1:
+                    size_str = f"{size_mb:.2f} MB"
+                elif artifact["size"] >= 1024:
+                    size_str = f"{artifact['size'] / 1024:.2f} KB"
+                else:
+                    size_str = f"{artifact['size']} bytes"
+
+                lines.append(f"- **{name}** ({size_str})")
+                lines.append(f"  - Path: `{artifact['rel_path']}`")
+
+                # Add to downloadable list (we'll show the first few key files)
+                if category in ["weight", "result", "export"] and len(downloadable_files) < 5:
+                    downloadable_files.append(artifact["path"])
+
+            lines.append("")  # Blank line between categories
+
+        best_pt = ""
+        for artifact in artifacts:
+            if artifact.get("name") == "best.pt":
+                try:
+                    best_pt = str(Path(artifact["path"]).relative_to(Path.cwd()))
+                except ValueError:
+                    best_pt = artifact["path"]
+                break
+
+        return "\n".join(lines), downloadable_files, best_pt
+
+    def clear_history(self) -> Tuple[str, pd.DataFrame]:
+        """Clear all task history."""
+        count = self.db.clear_history()
+        return f"✅ Cleared {count} records", pd.DataFrame(columns=["Job ID", "Skill", "Status", "Submitted At", "Artifacts"])
+
     def launch(self):
+        import json  # Import for system check JSON display
+
         with gr.Blocks(title="YOLO-Master WebUI", theme=GlobalConfig.THEME) as app:
             gr.Markdown("# 🚀 YOLO-Master Dashboard")
-            
-            with gr.Row(equal_height=False):
-                # ================= Sidebar: Control Panel =================
-                with gr.Column(scale=1, variant="panel"):
-                    gr.Markdown("### 🛠 Settings")
-                    
-                    # Task and Model Selection
-                    with gr.Group():
-                        task_radio = gr.Radio(
-                            choices=["detect", "seg", "cls", "pose", "obb"], 
-                            value="detect", 
-                            label="Task"
-                        )
-                        with gr.Row():
-                            model_dd = gr.Dropdown(
-                                choices=self.model_map["detect"], 
-                                value=self.model_map["detect"][0] if self.model_map["detect"] else None, 
-                                label="Model Weights", 
-                                scale=5,
-                                interactive=True
+
+            with gr.Tabs():
+                # ================= Original Inference Tab =================
+                with gr.TabItem("🖼️ Inference"):
+                    with gr.Row(equal_height=False):
+                        # Sidebar: Control Panel
+                        with gr.Column(scale=1, variant="panel"):
+                            gr.Markdown("### 🛠 Settings")
+
+                            # Task and Model Selection
+                            with gr.Group():
+                                task_radio = gr.Radio(
+                                    choices=["detect", "seg", "cls", "pose", "obb"],
+                                    value="detect",
+                                    label="Task"
+                                )
+                                with gr.Row():
+                                    model_dd = gr.Dropdown(
+                                        choices=self.model_map["detect"],
+                                        value=self.model_map["detect"][0] if self.model_map["detect"] else None,
+                                        label="Model Weights",
+                                        scale=5,
+                                        interactive=True
+                                    )
+                                    refresh_btn = gr.Button("🔄", scale=1, min_width=10, size="sm")
+                                custom_model_txt = gr.Textbox(
+                                    value="",
+                                    label="Custom Model Path (file or directory)",
+                                    placeholder="./ckpts/yolo_master_n.pt",
+                                    interactive=True
+                                )
+                                validate_btn = gr.Button("✅ Validate Path", size="sm")
+
+                            # Advanced Parameters
+                            with gr.Accordion("⚙️ Advanced Parameters", open=True):
+                                conf_slider = gr.Slider(0, 1, 0.25, step=0.01, label="Confidence (Conf)")
+                                iou_slider = gr.Slider(0, 1, 0.7, step=0.01, label="IoU Threshold")
+
+                                with gr.Row():
+                                    max_det_num = gr.Number(300, label="Max Objects", precision=0)
+                                    line_width_num = gr.Number(0, label="Line Width", precision=0)
+
+                                with gr.Row():
+                                    device_txt = gr.Textbox("0", label="Device ID (e.g. 0, cpu)", placeholder="0 or cpu")
+                                    cpu_chk = gr.Checkbox(False, label="Force CPU")
+
+                            # Output Options
+                            options_chk = gr.CheckboxGroup(
+                                ["half", "show", "save", "save_txt", "save_crop", "hide_labels", "hide_conf", "agnostic_nms", "retina_masks"],
+                                label="Output Options",
+                                value=[]
                             )
-                            refresh_btn = gr.Button("🔄", scale=1, min_width=10, size="sm")
-                        custom_model_txt = gr.Textbox(
-                            value="",
-                            label="Custom Model Path (file or directory)",
-                            placeholder="./ckpts/yolo_master_n.pt",
-                            interactive=True
-                        )
-                        validate_btn = gr.Button("✅ Validate Path", size="sm")
 
-                    # Advanced Parameters
-                    with gr.Accordion("⚙️ Advanced Parameters", open=True):
-                        conf_slider = gr.Slider(0, 1, 0.25, step=0.01, label="Confidence (Conf)")
-                        iou_slider = gr.Slider(0, 1, 0.7, step=0.01, label="IoU Threshold")
-                        
-                        with gr.Row():
-                            max_det_num = gr.Number(300, label="Max Objects", precision=0)
-                            line_width_num = gr.Number(0, label="Line Width", precision=0)
-                        
-                        with gr.Row():
-                            device_txt = gr.Textbox("0", label="Device ID (e.g. 0, cpu)", placeholder="0 or cpu")
-                            cpu_chk = gr.Checkbox(False, label="Force CPU")
+                            # Run Button
+                            run_btn = gr.Button("🔥 Start Inference", variant="primary", size="lg")
 
-                    # Output Options
-                    options_chk = gr.CheckboxGroup(
-                        ["half", "show", "save", "save_txt", "save_crop", "hide_labels", "hide_conf", "agnostic_nms", "retina_masks"],
-                        label="Output Options",
-                        value=[]
+                        # Main Area: Display Panel
+                        with gr.Column(scale=3):
+                            with gr.Tabs():
+                                with gr.TabItem("🖼️ Visualization"):
+                                    with gr.Row():
+                                        inp_img = gr.Image(type="numpy", label="Input Image", height=500)
+                                        out_img = gr.Image(type="numpy", label="Inference Result", height=500, interactive=False)
+                                    info_md = gr.Markdown(value="Waiting for input...")
+
+                                with gr.TabItem("📊 Data Analysis"):
+                                    gr.Markdown("### Detections Data")
+                                    out_df = gr.Dataframe(
+                                        headers=["Class ID", "Class Name", "Confidence", "x1", "y1", "x2", "y2"],
+                                        label="Raw Detections"
+                                    )
+
+                    # Event Binding for Inference Tab
+                    task_radio.change(fn=self.update_model_dropdown, inputs=task_radio, outputs=model_dd)
+                    refresh_btn.click(fn=self.refresh_models, inputs=task_radio, outputs=model_dd)
+                    validate_btn.click(fn=self.describe_model, inputs=[task_radio, custom_model_txt], outputs=info_md)
+
+                    run_btn.click(
+                        fn=self.inference,
+                        inputs=[
+                            task_radio, inp_img, model_dd, custom_model_txt,
+                            conf_slider, iou_slider, device_txt,
+                            max_det_num, line_width_num, cpu_chk, options_chk
+                        ],
+                        outputs=[out_img, out_df, info_md]
                     )
-                    
-                    # Run Button
-                    run_btn = gr.Button("🔥 Start Inference", variant="primary", size="lg")
 
-                # ================= Main Area: Display Panel =================
-                with gr.Column(scale=3):
+                # ================= NEW: Task Management Tab =================
+                with gr.TabItem("📋 Task Management"):
+                    gr.Markdown("## F1 Studio - Agent Task Management")
+
+                    # System Check Button at the top
+                    with gr.Row():
+                        system_check_btn = gr.Button("🩺 Environment Check", variant="secondary")
+                    system_check_output = gr.Markdown(value="")
+
+                    gr.Markdown("---")
+
+                    # Task Submission Area
+                    gr.Markdown("### 🚀 Task Submission")
+
+                    # P1: Async mode toggle
+                    with gr.Row():
+                        async_mode_checkbox = gr.Checkbox(label="⚡ Async Mode (run tasks in background)", value=True)
+                        gr.Markdown("*Enable to submit tasks without blocking. Disable for immediate feedback.*")
+
                     with gr.Tabs():
-                        with gr.TabItem("🖼️ Visualization"):
+                        # Train Task
+                        with gr.TabItem("🏋️ Train"):
                             with gr.Row():
-                                inp_img = gr.Image(type="numpy", label="Input Image", height=500)
-                                out_img = gr.Image(type="numpy", label="Inference Result", height=500, interactive=False)
-                            info_md = gr.Markdown(value="Waiting for input...")
+                                with gr.Column():
+                                    train_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                    train_data = gr.Textbox(label="Data", value="coco8.yaml", placeholder="coco8.yaml")
+                                with gr.Column():
+                                    train_epochs = gr.Number(label="Epochs", value=1, precision=0)
+                                    train_imgsz = gr.Number(label="Image Size", value=32, precision=0)
 
-                        with gr.TabItem("📊 Data Analysis"):
-                            gr.Markdown("### Detections Data")
-                            out_df = gr.Dataframe(
-                                headers=["Class ID", "Class Name", "Confidence", "x1", "y1", "x2", "y2"],
-                                label="Raw Detections"
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                train_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=1800,  # 30 minutes for training
+                                    precision=0,
+                                    info="Maximum execution time. Training jobs typically need more time."
+                                )
+
+                            train_submit_btn = gr.Button("▶️ Submit Train Task", variant="primary")
+                            train_output = gr.Markdown(value="")
+
+                        # Predict Task
+                        with gr.TabItem("🔍 Predict"):
+                            # P1.2: Batch mode selection
+                            batch_mode = gr.Radio(
+                                choices=["Single File/URL", "Directory (Batch)"],
+                                value="Single File/URL",
+                                label="Mode",
+                                info="Single: one image/video/URL. Batch: process all files in a directory"
                             )
 
-            # ================= Event Binding =================
-            
-            # 1. Auto-refresh model list
-            task_radio.change(fn=self.update_model_dropdown, inputs=task_radio, outputs=model_dd)
-            refresh_btn.click(fn=self.refresh_models, inputs=task_radio, outputs=model_dd)
-            validate_btn.click(fn=self.describe_model, inputs=[task_radio, custom_model_txt], outputs=info_md)
-            
-            # 2. Inference Logic
-            run_btn.click(
-                fn=self.inference,
-                inputs=[
-                    task_radio, inp_img, model_dd, custom_model_txt,
-                    conf_slider, iou_slider, device_txt, 
-                    max_det_num, line_width_num, cpu_chk, options_chk
-                ],
-                outputs=[out_img, out_df, info_md]
-            )
+                            with gr.Row():
+                                predict_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                predict_source = gr.Textbox(
+                                    label="Source",
+                                    value="coco8/images/",
+                                    placeholder="Path to image, video, URL, or directory"
+                                )
+
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                predict_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=600,  # 10 minutes
+                                    precision=0,
+                                    info="Maximum execution time. Task will be cancelled if exceeded."
+                                )
+
+                            predict_submit_btn = gr.Button("▶️ Submit Predict Task", variant="primary")
+                            predict_output = gr.Markdown(value="")
+
+                        # Export Task
+                        with gr.TabItem("📦 Export"):
+                            with gr.Row():
+                                export_model = gr.Textbox(label="Model", value="yolo11n.pt", placeholder="yolo11n.pt")
+                                export_format = gr.Dropdown(
+                                    choices=["onnx", "torchscript", "coreml", "saved_model", "tflite"],
+                                    value="onnx",
+                                    label="Format"
+                                )
+
+                            # P1.3: Timeout configuration
+                            with gr.Accordion("⚙️ Advanced Options", open=False):
+                                export_timeout = gr.Number(
+                                    label="Timeout (seconds)",
+                                    value=600,  # 10 minutes
+                                    precision=0,
+                                    info="Maximum execution time for model export."
+                                )
+
+                            export_submit_btn = gr.Button("▶️ Submit Export Task", variant="primary")
+                            export_output = gr.Markdown(value="")
+
+                    gr.Markdown("---")
+
+                    # Task History Area
+                    gr.Markdown("### 📜 Task History")
+                    with gr.Row():
+                        refresh_history_btn = gr.Button("🔄 Refresh History")
+                        clear_history_btn = gr.Button("🗑️ Clear History", variant="stop")
+
+                    history_df = gr.Dataframe(
+                        value=self.load_task_history(),
+                        headers=["Select", "Job ID", "Skill", "Status", "Submitted At", "Artifacts"],
+                        datatype=["bool", "str", "str", "str", "str", "str"],
+                        label="Task History (check ✓ to compare)",
+                        interactive=True
+                    )
+
+                    # P1 Task 1.3: Experiment Comparison
+                    gr.Markdown("---")
+                    gr.Markdown("### 📊 Experiment Comparison")
+                    gr.Markdown("💡 **Tip**: Select 2 or more training tasks above to compare their performance metrics")
+                    with gr.Row():
+                        compare_btn = gr.Button("🔬 Compare Selected Jobs", variant="primary")
+                    comparison_output = gr.Markdown(value="")
+                    comparison_table = gr.Dataframe(
+                        value=pd.DataFrame(),
+                        label="Comparison Results"
+                    )
+
+                    gr.Markdown("---")
+
+                    # P1: Task Control
+                    gr.Markdown("### ⚙️ Task Control")
+                    with gr.Row():
+                        cancel_job_id = gr.Textbox(label="Job ID", placeholder="Enter Job ID to cancel")
+                        cancel_task_btn = gr.Button("🛑 Cancel Task", variant="stop")
+                    cancel_output = gr.Markdown(value="")
+
+                    # Artifact Viewer
+                    gr.Markdown("### 🔍 Artifact Inspector")
+                    with gr.Row():
+                        artifact_job_id = gr.Textbox(label="Job ID", placeholder="Enter Job ID to view artifacts")
+                        view_artifacts_btn = gr.Button("👁️ View Artifacts")
+                    artifact_output = gr.Markdown(value="")
+
+                    # Download section
+                    gr.Markdown("**Quick Downloads** (key files from selected job)")
+                    artifact_files = gr.File(
+                        label="Downloadable Files",
+                        file_count="multiple",
+                        interactive=False,
+                        visible=True
+                    )
+
+                    best_pt_state = gr.State(value="")
+                    with gr.Row(visible=False) as quick_actions_row:
+                        quick_predict_btn = gr.Button("➡️ Use for Predict", variant="secondary")
+                        quick_export_btn = gr.Button("📦 Export Model", variant="secondary")
+
+                    # Event Binding for Task Management Tab
+                    system_check_btn.click(
+                        fn=self.handle_system_check,
+                        outputs=system_check_output
+                    )
+
+                    train_submit_btn.click(
+                        fn=self.handle_train_submit,
+                        inputs=[train_model, train_data, train_epochs, train_imgsz, train_timeout, async_mode_checkbox],
+                        outputs=[train_output, history_df]
+                    )
+
+                    predict_submit_btn.click(
+                        fn=self.handle_predict_submit,
+                        inputs=[batch_mode, predict_model, predict_source, predict_timeout, async_mode_checkbox],
+                        outputs=[predict_output, history_df]
+                    )
+
+                    export_submit_btn.click(
+                        fn=self.handle_export_submit,
+                        inputs=[export_model, export_format, export_timeout],
+                        outputs=[export_output, history_df]
+                    )
+
+                    cancel_task_btn.click(
+                        fn=self.handle_cancel_task,
+                        inputs=[cancel_job_id],
+                        outputs=[cancel_output, history_df]
+                    )
+
+                    refresh_history_btn.click(
+                        fn=self.load_task_history,
+                        outputs=history_df
+                    )
+
+                    clear_history_btn.click(
+                        fn=self.clear_history,
+                        outputs=[artifact_output, history_df]
+                    )
+
+                    # P1 Task 1.3: Experiment comparison event binding
+                    compare_btn.click(
+                        fn=self.handle_experiment_comparison_from_selection,
+                        inputs=history_df,
+                        outputs=[comparison_table, comparison_output]
+                    )
+
+                    history_df.select(
+                        fn=self.on_history_row_select,
+                        inputs=history_df,
+                        outputs=[cancel_job_id, artifact_job_id]
+                    )
+
+                    view_artifacts_btn.click(
+                        fn=self.view_artifacts,
+                        inputs=artifact_job_id,
+                        outputs=[artifact_output, artifact_files, best_pt_state]
+                    ).then(
+                        fn=lambda p: gr.update(visible=bool(p)),
+                        inputs=best_pt_state,
+                        outputs=quick_actions_row
+                    )
+
+                    quick_predict_btn.click(
+                        fn=lambda p: p,
+                        inputs=best_pt_state,
+                        outputs=predict_model
+                    )
+
+                    quick_export_btn.click(
+                        fn=lambda p: p,
+                        inputs=best_pt_state,
+                        outputs=export_model
+                    )
 
         app.launch(share=False, inbrowser=True)
 
