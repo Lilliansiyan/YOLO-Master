@@ -1,17 +1,16 @@
 """MoLoRA utilities: parameter stats, merge/unmerge, init, domain allocation."""
+
 import math
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-from ultralytics.utils import LOGGER
 
 
 # ---------------------------------------------------------------------------
 # rsLoRA scaling
 # ---------------------------------------------------------------------------
+
 
 def _molora_scales(r: int, alpha: int, use_rslora: bool = True) -> float:
     """Return the LoRA scaling factor.
@@ -27,6 +26,7 @@ def _molora_scales(r: int, alpha: int, use_rslora: bool = True) -> float:
 # ---------------------------------------------------------------------------
 # Expert initialization
 # ---------------------------------------------------------------------------
+
 
 def init_lora_expert_a(weight: nn.Parameter, init_type: str = "default") -> None:
     """Initialize LoRA A (down-projection) weight.
@@ -69,6 +69,7 @@ def init_lora_expert_b(weight: nn.Parameter, init_type: str = "default") -> None
 # Module shape introspection
 # ---------------------------------------------------------------------------
 
+
 def get_conv_shape(module: nn.Conv2d) -> Tuple[int, int, int, int, Tuple[int, int], int, int]:
     """Return (in_channels, out_channels, kernel_size_h, kernel_size_w, padding, stride, groups)."""
     k = module.kernel_size
@@ -100,9 +101,8 @@ def is_linear(module: nn.Module) -> bool:
 # Domain allocation for continual learning
 # ---------------------------------------------------------------------------
 
-def allocate_domain_experts(
-    num_experts: int, domains: List[str]
-) -> Dict[str, List[int]]:
+
+def allocate_domain_experts(num_experts: int, domains: List[str]) -> Dict[str, List[int]]:
     """Allocate expert indices evenly across domains.
 
     Args:
@@ -130,6 +130,7 @@ def allocate_domain_experts(
 # Parameter freezing / trainability
 # ---------------------------------------------------------------------------
 
+
 def mark_only_molora_as_trainable(model: nn.Module) -> None:
     """Freeze all parameters except MoLoRA adapter parameters.
 
@@ -139,8 +140,10 @@ def mark_only_molora_as_trainable(model: nn.Module) -> None:
     """
     # Lazy import to avoid circular dependency (layer.py / moe_aware.py import utils.py)
     from ultralytics.nn.peft.molora.layer import MoLoRALayer
+
     try:
         from ultralytics.nn.peft.molora.moe_aware import MoLoRAMoEAwareLayer
+
         molora_types = (MoLoRALayer, MoLoRAMoEAwareLayer)
     except ImportError:
         molora_types = (MoLoRALayer,)
@@ -163,9 +166,7 @@ def count_parameters(model: nn.Module) -> Dict[str, int]:
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     molora = sum(
-        p.numel()
-        for n, p in model.named_parameters()
-        if any(k in n for k in ("lora_A", "lora_B", "router", "molora"))
+        p.numel() for n, p in model.named_parameters() if any(k in n for k in ("lora_A", "lora_B", "router", "molora"))
     )
     return {
         "total": total,
@@ -181,6 +182,34 @@ def count_parameters(model: nn.Module) -> Dict[str, int]:
 # Merge / Unmerge helpers
 # ---------------------------------------------------------------------------
 
+
+def _conv_expert_delta(lora_a: nn.Conv2d, lora_b: nn.Conv2d, scale: float) -> torch.Tensor:
+    """Full-rank delta [out_c, in_c, kH, kW] equivalent to lora_B(lora_A(x)) * scale.
+
+    lora_A is a dense 1x1 conv [r, in_c, 1, 1]. lora_B is a KxK conv that carries the
+    base layer's groups, so its weight is [out_c, r // groups, kH, kW] and each output
+    group composes only with its own slice of the r rank channels.
+    """
+    a = lora_a.weight.squeeze(-1).squeeze(-1)  # [r, in_c]
+    b = lora_b.weight
+    b_groups = getattr(lora_b, "groups", 1)
+    if b_groups == 1:
+        return torch.einsum("orkw,ri->oikw", b, a) * scale  # [out_c, in_c, kH, kW]
+    out_c, r_per_g = b.shape[0], b.shape[1]
+    bg = b.view(b_groups, out_c // b_groups, r_per_g, *b.shape[2:])
+    ag = a.view(b_groups, r_per_g, a.shape[1])
+    delta = torch.einsum("gorkw,gri->goikw", bg, ag)
+    return delta.reshape(out_c, a.shape[1], *b.shape[2:]) * scale
+
+
+def _fold_delta_for_groups(delta: torch.Tensor, groups: int) -> torch.Tensor:
+    """Fold a full [out_c, in_c, kH, kW] delta to the grouped base shape [out_c, in_c//g, kH, kW]."""
+    if groups <= 1:
+        return delta
+    in_c = delta.shape[1]
+    return delta.view(delta.shape[0], groups, in_c // groups, *delta.shape[2:]).sum(dim=1)
+
+
 def _merge_conv_delta(
     base_weight: nn.Parameter,
     lora_a: nn.Conv2d,
@@ -190,23 +219,16 @@ def _merge_conv_delta(
 ) -> None:
     """Merge a single LoRA expert delta into a Conv2d base weight.
 
-    Conv2d weight shape: [out_c, in_c//groups, kH, kW] (grouped)
+    Conv2d base weight shape: [out_c, in_c//groups, kH, kW] (grouped)
     lora_A: [r, in_c, 1, 1]  (1x1 conv, groups=1)
-    lora_B: [out_c, r, kH, kW]  (KxK conv, groups=1)
+    lora_B: [out_c, r//groups, kH, kW]  (KxK conv, groups follows the base layer)
 
-    Equivalent delta = lora_B @ lora_A via matmul + expand.
-    For grouped base conv, fold [out_c, in_c, kH, kW] -> [out_c, in_c//g, kH, kW].
+    The equivalent full delta is composed per group, then folded to the grouped
+    base shape when groups > 1.
     """
     with torch.no_grad():
-        a = lora_a.weight.squeeze(-1).squeeze(-1)  # [r, in_c]
-        b = lora_b.weight  # [out_c, r, kH, kW]
-        delta = torch.einsum("orkw,ri->oikw", b, a) * scale  # [out_c, in_c, kH, kW]
-        if groups > 1:
-            in_c = delta.shape[1]
-            delta = delta.view(
-                delta.shape[0], groups, in_c // groups, *delta.shape[2:]
-            ).sum(dim=1)
-        base_weight.data.add_(delta)
+        delta = _conv_expert_delta(lora_a, lora_b, scale)
+        base_weight.data.add_(_fold_delta_for_groups(delta, groups))
 
 
 def _merge_linear_delta(
@@ -231,15 +253,8 @@ def _unmerge_conv_delta(
 ) -> None:
     """Unmerge a single LoRA expert delta from a Conv2d base weight."""
     with torch.no_grad():
-        a = lora_a.weight.squeeze(-1).squeeze(-1)
-        b = lora_b.weight
-        delta = torch.einsum("orkw,ri->oikw", b, a) * scale
-        if groups > 1:
-            in_c = delta.shape[1]
-            delta = delta.view(
-                delta.shape[0], groups, in_c // groups, *delta.shape[2:]
-            ).sum(dim=1)
-        base_weight.data.sub_(delta)
+        delta = _conv_expert_delta(lora_a, lora_b, scale)
+        base_weight.data.sub_(_fold_delta_for_groups(delta, groups))
 
 
 def _unmerge_linear_delta(

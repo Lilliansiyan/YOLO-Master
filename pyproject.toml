@@ -92,6 +92,9 @@ dev = [
     "mkdocs-ultralytics-plugin>=0.2.5", # for meta descriptions and images, dates and authors
     "minijinja>=2.0.0", # render docs macros without mkdocs-macros-plugin
 ]
+foundation = [
+    "transformers>=4.56.0,<6; python_version >= '3.10'",
+]
 export-base = [
     "onnx>=1.12.0; platform_system != 'Darwin'", # ONNX export
     "onnx>=1.12.0,<1.18.0; platform_system == 'Darwin' and python_version < '3.13'",  # TF inference hanging on MacOS (tested up to onnx==1.20.0)
@@ -224,6 +227,18 @@ docstring-code-format = true
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# Research/ablation/smoke scripts legitimately bootstrap sys.path before imports
+# (E402) and favor compact one-liner style (E701/E702); declare the deliberate
+# deviations explicitly instead of leaving them as bare lint debt.
+"scripts/**" = ["E402", "E701", "E702", "F841"]
+"agent/scripts/**" = ["E402"]
+"agent/runtime/cli/compare_open_world_profiles.py" = ["E402"]
+"tests/ddp_moa_mot_smoke.py" = ["E701", "E702"]
+"tests/ddp_moe_validation_smoke.py" = ["E701", "E702"]
+"tests/lora_e2e_smoke.py" = ["E402", "E701", "E702"]
+"tests/lora_rankless_smoke.py" = ["E402", "E701", "E702"]
 
 [tool.docformatter]
 wrap-summaries = 120

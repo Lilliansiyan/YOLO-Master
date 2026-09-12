@@ -3,12 +3,11 @@
 Unlike NLP per-token routers, YOLO-Master MoLoRA uses whole-image routing
 (linear by default), with optional spatial and hybrid variants.
 """
-import math
-from typing import Optional, Tuple
+
+from typing import Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 class LinearRouter(nn.Module):
@@ -113,6 +112,7 @@ class HybridRouter(nn.Module):
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
+
 
 def build_router(
     router_type: str,

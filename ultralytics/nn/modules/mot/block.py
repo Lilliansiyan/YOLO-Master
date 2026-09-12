@@ -43,6 +43,8 @@ class MoTBlock(nn.Module):
         exploration_eps (float): Training-only dense routing floor that keeps all experts trainable.
         sparse_train_warmup_steps (int): Dense training forwards before enabled sparse dispatch begins.
         local_attn_window (int): LocalConv attention window; 0 keeps global attention.
+        export_masked (bool): When True (default), traced/exported routers rebuild
+            sparse-equivalent Top-K masked weights. Pass False for legacy dense softmax.
 
     Shape:
         Input:  [B, dim, H, W]
@@ -74,6 +76,7 @@ class MoTBlock(nn.Module):
         sparse_train_warmup_steps: int = 0,
         scene_inference_mode: str = "dynamic",
         local_attn_window: int = 0,
+        export_masked: bool = True,
     ):
         super().__init__()
         if not 1 <= top_k <= self.NUM_EXPERTS:
@@ -139,6 +142,7 @@ class MoTBlock(nn.Module):
             scene_aware=scene_aware_router,
             scene_hidden_dim=scene_hidden_dim,
             scene_inference_mode=scene_inference_mode,
+            export_masked=export_masked,
         )
 
         # Final output norm & projection
@@ -206,8 +210,12 @@ class MoTBlock(nn.Module):
             ddp_sparse_train_safe=ddp_sparse_safe,
             ddp_contract_source=self._ddp_contract_source,
             ddp_fallback_reason=ddp_fallback_reason,
+            export_router_weights="masked_topk" if self.router.export_masked else "dense_softmax",
             sparse_export_limitation=(
-                "MoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing use dense blending "
+                "MoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing rebuild "
+                "sparse-equivalent masked Top-K router weights (bit-exact with eager dispatch)."
+                if self.router.export_masked
+                else "MoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing use dense blending "
                 "because expert selection is data-dependent."
             ),
         )
@@ -334,7 +342,7 @@ class MoTBlock(nn.Module):
             ddp_sparse_safe=ddp_sparse_safe,
         )
         use_sparse = (not self.training or (sparse_train_ready and ddp_sparse_safe)) and not exporting
-        warmup_step = 0 if exporting else int(self._sparse_train_step.item())
+        warmup_step = int(self._sparse_train_step.item())
         B = x.shape[0]
         route_ids = indices if indices is not None else weights.argmax(dim=1, keepdim=True)
         route_mask = torch.zeros_like(weights, dtype=torch.bool)
@@ -342,12 +350,6 @@ class MoTBlock(nn.Module):
         token_mask_sparsity = 1.0 - float(route_mask.float().mean())
         experts_per_sample = route_mask.reshape(B, self.NUM_EXPERTS, -1).any(dim=2).sum(dim=1)
         batch_expert_union = int(route_mask.any(dim=(0, 2, 3)).sum())
-        routing_metrics = {
-            "token_mask_sparsity": token_mask_sparsity,
-            "experts_per_sample": experts_per_sample.detach().cpu(),
-            "mean_experts_per_sample": float(experts_per_sample.float().mean()),
-            "batch_expert_union": batch_expert_union,
-        }
         if use_sparse:
             expert_calls = 0
             for e_idx, expert in enumerate(self.experts):
@@ -367,26 +369,8 @@ class MoTBlock(nn.Module):
                         f"→ output {tuple(expert_out.shape)}. All experts must preserve "
                         f"the input tensor shape."
                     )
-                out[batch_idx] = out[batch_idx] + expert_out * w
-            selected_experts = int((indices if indices is not None else weights).unique().numel())
-            self._last_dispatch_stats = {
-                "mode": "sample_sparse",
-                "expert_calls": expert_calls,
-                "actual_expert_calls": expert_calls,
-                **routing_metrics,
-                "selected_samples": B,
-                "selected_experts": selected_experts,
-                "sparsity_ratio": 1.0 - expert_calls / max(len(self.experts), 1),
-                "policy": dispatch_policy,
-                "warmup_step": warmup_step,
-                "warmup_steps": self.sparse_train_warmup_steps,
-                "sparse_train_ready": sparse_train_ready,
-                "ddp_active": ddp_active,
-                "ddp_find_unused_parameters": self._ddp_find_unused_parameters,
-                "ddp_sparse_train_safe": ddp_sparse_safe,
-                "ddp_contract_source": self._ddp_contract_source,
-                "ddp_fallback_reason": ddp_fallback_reason,
-            }
+                out[batch_idx] = out[batch_idx] + (expert_out * w).to(out.dtype)
+            mode, expert_calls_total = "sample_sparse", expert_calls
         else:
             for e_idx, expert in enumerate(self.experts):
                 w = weights[:, e_idx : e_idx + 1]
@@ -397,26 +381,28 @@ class MoTBlock(nn.Module):
                         f"→ output {tuple(expert_out.shape)}. All experts must preserve "
                         f"the input tensor shape."
                     )
-                out = out + expert_out * w
-            self._last_dispatch_stats = {
-                "mode": "dense",
-                "expert_calls": len(self.experts),
-                "actual_expert_calls": len(self.experts),
-                **routing_metrics,
-                "selected_samples": B,
-                "selected_experts": len(self.experts),
-                "sparsity_ratio": 0.0,
-                "policy": "dense_export" if exporting else dispatch_policy,
-                "warmup_step": warmup_step,
-                "warmup_steps": self.sparse_train_warmup_steps,
-                "sparse_train_ready": sparse_train_ready,
-                "ddp_active": ddp_active,
-                "ddp_find_unused_parameters": self._ddp_find_unused_parameters,
-                "ddp_sparse_train_safe": ddp_sparse_safe,
-                "ddp_contract_source": self._ddp_contract_source,
-                "ddp_fallback_reason": ddp_fallback_reason,
-            }
-        if self.training and self.sparse_train and not exporting:
+                out = out + (expert_out * w).to(out.dtype)
+            mode, expert_calls_total = "dense", len(self.experts)
+        self._last_dispatch_stats = {
+            "mode": mode,
+            "policy": dispatch_policy,
+            "expert_calls": expert_calls_total,
+            "actual_expert_calls": expert_calls_total,
+            "selected_samples": B,
+            "selected_experts": batch_expert_union,
+            "sparsity_ratio": token_mask_sparsity,
+            "token_mask_sparsity": token_mask_sparsity,
+            "experts_per_sample": experts_per_sample.detach().cpu(),
+            "mean_experts_per_sample": float(experts_per_sample.float().mean()),
+            "batch_expert_union": batch_expert_union,
+            "warmup_step": warmup_step,
+            "ddp_active": ddp_active,
+            "ddp_find_unused_parameters": self._ddp_find_unused_parameters,
+            "ddp_contract_source": self._ddp_contract_source,
+            "ddp_fallback_reason": ddp_fallback_reason,
+        }
+        if self.training:
+            # Count each training forward so the dense-warmup schedule advances.
             self._sparse_train_step.add_(1)
         return out
 

@@ -7,14 +7,14 @@ Part B: 1-Epoch Training Smoke Test (if applicable)
 import sys
 import traceback
 import torch
-import torch.nn as nn
 from datetime import datetime
 
 # Add project root to path if needed
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from ultralytics.utils.lora.planner import ArchitectureFingerprint, PEFTPlanner, PlacementDecision
+from ultralytics.utils.lora.planner import ArchitectureFingerprint, PEFTPlanner
 from ultralytics.utils.lora.config import LoRAConfig
 from ultralytics.utils.lora.api import apply_lora, _compute_param_stats
 
@@ -61,7 +61,7 @@ def main():
 
     # 3. Compute ArchitectureFingerprint on the inner model
     fingerprint = ArchitectureFingerprint.compute(inner_model)
-    log(f"\nArchitecture Fingerprint:")
+    log("\nArchitecture Fingerprint:")
     log(f"  phi_attn   = {fingerprint.phi_attn:.4f}")
     log(f"  phi_text   = {fingerprint.phi_text:.4f}")
     log(f"  phi_dw     = {fingerprint.phi_dw:.4f}")
@@ -70,7 +70,9 @@ def main():
 
     # 4. Call PEFTPlanner.plan() with LoRAConfig
     config = LoRAConfig(r=16, alpha=32, peft_type="lora", planner_enabled=True)
-    log(f"\nLoRAConfig: r={config.r}, alpha={config.alpha}, peft_type={config.peft_type}, planner_enabled={config.planner_enabled}")
+    log(
+        f"\nLoRAConfig: r={config.r}, alpha={config.alpha}, peft_type={config.peft_type}, planner_enabled={config.planner_enabled}"
+    )
 
     planner = PEFTPlanner()
     decision = planner.plan(detection_model, config)
@@ -97,7 +99,7 @@ def main():
 
         # Check if model was actually modified
         stats = _compute_param_stats(modified_model)
-        log(f"\nParameter Statistics:")
+        log("\nParameter Statistics:")
         log(f"  Total parameters:      {stats.total:,}")
         log(f"  Trainable parameters:  {stats.trainable:,} ({stats.trainable_pct:.2f}%)")
         log(f"  Frozen parameters:     {stats.frozen:,}")
@@ -165,7 +167,7 @@ def main():
             log(f"Loaded fresh model: {type(model).__name__}")
 
             # Run 1-epoch training with MPS
-            log(f"Starting training: epochs=1, imgsz=320, batch=4, device=mps, lora_planner_enabled=True")
+            log("Starting training: epochs=1, imgsz=320, batch=4, device=mps, lora_planner_enabled=True")
             results = model.train(
                 data="coco128.yaml",
                 epochs=1,
@@ -200,6 +202,7 @@ def main():
             log("\nRetrying with device='cpu'...")
             try:
                 from ultralytics import YOLO
+
                 model = YOLO(weight_path)
                 results = model.train(
                     data="coco128.yaml",
@@ -224,10 +227,11 @@ def main():
         log("Model was REFUSEd. Running Full-SFT smoke test instead...")
         try:
             from ultralytics import YOLO
+
             model = YOLO(weight_path)
             log(f"Loaded fresh model: {type(model).__name__}")
 
-            log(f"Starting Full-SFT training: epochs=1, imgsz=320, batch=4, device=mps, lora_r=0")
+            log("Starting Full-SFT training: epochs=1, imgsz=320, batch=4, device=mps, lora_r=0")
             results = model.train(
                 data="coco128.yaml",
                 epochs=1,
@@ -255,6 +259,7 @@ def main():
             log("\nRetrying Full-SFT with device='cpu'...")
             try:
                 from ultralytics import YOLO
+
                 model = YOLO(weight_path)
                 results = model.train(
                     data="coco128.yaml",
@@ -284,8 +289,10 @@ def main():
     separator()
     log(f"Model:                {weight_path}")
     log(f"Architecture Family:  {ArchitectureFingerprint._detect_architecture_family(inner_model)}")
-    log(f"Fingerprint:            φ_attn={fingerprint.phi_attn:.4f}, φ_text={fingerprint.phi_text:.4f}, "
-        f"φ_dw={fingerprint.phi_dw:.4f}, φ_group={fingerprint.phi_group:.4f}, φ_linear={fingerprint.phi_linear:.4f}")
+    log(
+        f"Fingerprint:            φ_attn={fingerprint.phi_attn:.4f}, φ_text={fingerprint.phi_text:.4f}, "
+        f"φ_dw={fingerprint.phi_dw:.4f}, φ_group={fingerprint.phi_group:.4f}, φ_linear={fingerprint.phi_linear:.4f}"
+    )
     log(f"Planner Decision:     {decision.status}")
     if decision.refusal_reason:
         log(f"Refusal Reason:       {decision.refusal_reason}")
@@ -301,7 +308,7 @@ def main():
         for w in warnings:
             log(f"  - {w}")
     if error_traceback and training_result.startswith("FAILURE"):
-        log(f"\nLast Error Traceback (last 30 lines):")
+        log("\nLast Error Traceback (last 30 lines):")
         lines = error_traceback.strip().split("\n")
         for line in lines[-30:]:
             log(f"  {line}")
@@ -310,8 +317,7 @@ def main():
 
     # Save report to file
     report_path = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        "experiment_report_RT-DETR-l Planner+training validation.txt"
+        os.path.dirname(os.path.abspath(__file__)), "experiment_report_RT-DETR-l Planner+training validation.txt"
     )
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(REPORT_LINES))

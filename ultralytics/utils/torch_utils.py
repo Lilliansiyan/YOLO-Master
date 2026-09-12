@@ -601,7 +601,10 @@ def copy_attr(a, b, include=(), exclude=()):
 
 
 def intersect_dicts(da, db, exclude=()):
-    """Return a dictionary of intersecting keys with matching shapes, excluding 'exclude' keys, using da values.
+    """Return intersecting tensor entries with matching shapes, excluding keys containing any excluded string.
+
+    Non-tensor extra state is intentionally skipped because this helper is used for transferable model weights, not
+    strict restoration of module configuration or runtime metadata.
 
     Args:
         da (dict): First dictionary.
@@ -609,9 +612,17 @@ def intersect_dicts(da, db, exclude=()):
         exclude (tuple, optional): Keys to exclude.
 
     Returns:
-        (dict): Dictionary of intersecting keys with matching shapes.
+        (dict): Dictionary of intersecting tensor entries with matching shapes.
     """
-    return {k: v for k, v in da.items() if k in db and all(x not in k for x in exclude) and v.shape == db[k].shape}
+    return {
+        k: v
+        for k, v in da.items()
+        if k in db
+        and all(x not in k for x in exclude)
+        and isinstance(v, torch.Tensor)
+        and isinstance(db[k], torch.Tensor)
+        and v.shape == db[k].shape
+    }
 
 
 def is_parallel(model):
@@ -819,6 +830,11 @@ def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, A
     if x.get("ema"):
         x["model"] = x["ema"]  # replace model with EMA
 
+    # Unwrap training-only distillation wrappers to save only the deployable student model.
+    from ultralytics.nn.foundation_distill_model import strip_foundation_distillation_model
+
+    x["model"] = strip_foundation_distillation_model(x["model"])
+
     # Unwrap DistillationModel to save only the student model
     from ultralytics.nn.distill_model import DistillationModel
 
@@ -827,7 +843,14 @@ def strip_optimizer(f: str | Path = "best.pt", s: str = "", updates: dict[str, A
         x["model"] = x["model"].student_model
 
     if hasattr(x["model"], "args"):
-        x["model"].args = dict(x["model"].args)  # convert from IterableSimpleNamespace to dict
+        model_args = x["model"].args
+        x["model"].args = (
+            dict(model_args)
+            if isinstance(model_args, dict)
+            else vars(model_args).copy()
+            if hasattr(model_args, "__dict__")
+            else model_args
+        )  # convert from IterableSimpleNamespace or namespace to dict
     if hasattr(x["model"], "criterion"):
         x["model"].criterion = None  # strip loss criterion
     x["model"].half()  # to FP16

@@ -115,7 +115,7 @@ The timeline is drawn from the release range, including the upstream modernizati
 | Area | Release status | What v26.08 adds |
 |---|---|---|
 | **Ultralytics 8.4.101 / YOLO26** | **Stable upstream base** | Native task flows, checkpoint compatibility, export integrity, and additive mixture registration |
-| **MultiTask** | **Preview** | A YAML-declared detect/segment/pose release profile with optional task-feature routing; additional head branches require matching supervision and validation evidence |
+| **MultiTask** | **Preview** | Unified detection, segmentation, pose, classification, depth, normal, and semantic branches with optional task routing; OBB uses its dedicated task model |
 | **Shared Expert MoE** | **Validated component** | Model-scoped expert-pool reuse with cross-model isolation |
 | **MoA / MoT** | **Experimental profiles** | Routed attention and transformer blocks, sparse paths, scene-aware routing, and shared temperature scheduling |
 | **PEFT Planner / LOVO** | **Opt-in** | Architecture-conditioned placement, V-PEFT solvers, validation, and FewShot-LoRA controls |
@@ -320,9 +320,9 @@ flowchart LR
                                │
                       Optional TaskRouter
                                │
-        ┌──────────┬─────────┬──────┬──────────┬───────┬─────┐
-        │ Detect   │ Segment │ Pose │ Classify │ Depth │ OBB │
-        └──────────┴─────────┴──────┴──────────┴───────┴─────┘
+        ┌──────────┬─────────┬──────┬──────────┬───────┬────────┬──────────┐
+        │ Detect   │ Segment │ Pose │ Classify │ Depth │ Normal │ Semantic │
+        └──────────┴─────────┴──────┴──────────┴───────┴────────┴──────────┘
 ```
 
 | Component | Role |
@@ -341,7 +341,7 @@ yolo multitask train \
 ```
 
 > [!NOTE]
-> The shipped MultiTask YAML and COCO-unified dataset declare **detection, instance segmentation, and human pose**. The `MultiTaskHead` can construct other branch types, but the trainer rejects a selected branch unless its dataset, criterion, and validation contract are present; MultiTask OBB remains non-trainable. The current `multitask` prediction map uses `DetectionPredictor`; a public `tasks=[...]` multi-output inference API is not documented in this release.
+> The current unified COCO pipeline has aligned trainable labels for detection, instance segmentation, and human pose. Classification, depth, normal, and semantic branches require suitable aligned labels before they contribute a training loss. Unified MultiTask OBB training is unsupported; use the dedicated OBB model. The current `multitask` prediction map uses `DetectionPredictor`; a public `tasks=[...]` multi-output inference API is not documented in this release.
 
 **Implementation:** `ultralytics/nn/modules/multitask/` · `ultralytics/models/yolo/multitask/` · `ultralytics/nn/tasks.py`
 

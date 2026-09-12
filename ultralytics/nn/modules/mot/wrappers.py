@@ -1,13 +1,20 @@
 """YAML-facing wrappers and collection helpers for Mixture-of-Transformer."""
+
 from __future__ import annotations
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from ultralytics.nn.modules.conv import Conv
 from ultralytics.nn.modules.utils import robust_deepcopy
-from ultralytics.nn.modules.routing_protocol import collect_aux_loss, export_capabilities as _export_routing_capabilities, publish_aux_loss, routing_snapshot as _routing_snapshot
+from ultralytics.nn.modules.routing_protocol import (
+    collect_aux_loss,
+    export_capabilities as _export_routing_capabilities,
+    publish_aux_loss,
+    routing_snapshot as _routing_snapshot,
+)
 from ultralytics.utils import LOGGER
 from .block import MoTBlock
+
 
 class C2fMoT(nn.Module):
     """C2f-style feature-flow wrapper around MoTBlock.
@@ -31,6 +38,9 @@ class C2fMoT(nn.Module):
         balance_loss_coeff (float): Router balance loss weight.
         e (float): Internal channel expansion ratio.
         sparse_train_warmup_steps (int): Dense training forwards before enabled sparse dispatch begins.
+        export_masked (bool): When True (default), traced/exported routers rebuild
+            sparse-equivalent Top-K masked weights (bit-exact with eager sparse dispatch).
+            Pass False to keep the legacy dense-softmax export fallback.
 
     Shape:
         Input:  [B, c1, H, W]
@@ -57,6 +67,7 @@ class C2fMoT(nn.Module):
         sparse_train_warmup_steps: int = 0,
         scene_inference_mode: str = "dynamic",
         local_attn_window: int = 0,
+        export_masked: bool = True,
     ):
         super().__init__()
         self.c = int(c2 * e)
@@ -97,6 +108,7 @@ class C2fMoT(nn.Module):
                 sparse_train_warmup_steps=sparse_train_warmup_steps,
                 scene_inference_mode=scene_inference_mode,
                 local_attn_window=local_attn_window,
+                export_masked=export_masked,
             )
             for i in range(n)
         )
@@ -180,8 +192,12 @@ class C2fMoT(nn.Module):
             ddp_sparse_train_safe=child_capabilities.get("ddp_sparse_train_safe", True),
             ddp_contract_source=child_capabilities.get("ddp_contract_source", "unconfigured"),
             ddp_fallback_reason=child_capabilities.get("ddp_fallback_reason"),
+            export_router_weights=child_capabilities.get("export_router_weights", "masked_topk"),
             sparse_export_limitation=(
-                "C2fMoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing use dense blending."
+                "C2fMoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing rebuild "
+                "sparse-equivalent masked Top-K router weights (bit-exact with eager dispatch)."
+                if child_capabilities.get("export_router_weights") == "masked_topk"
+                else "C2fMoT eager execution supports Top-K sparse dispatch; ONNX and TorchScript tracing use dense blending."
             ),
         )
         return capabilities
@@ -189,12 +205,14 @@ class C2fMoT(nn.Module):
     def __deepcopy__(self, memo):
         return robust_deepcopy(self, memo)
 
+
 def _aux_loss_device(model: nn.Module) -> torch.device:
     """Best-effort device lookup for zero aux-loss fallbacks."""
     try:
         return next(model.parameters()).device
     except StopIteration:
         return torch.device("cpu")
+
 
 def collect_mot_aux_loss(model: nn.Module, ddp_sync: bool = True) -> torch.Tensor:
     """Sum all MoT router aux losses in the model and optionally DDP-sync across ranks.
@@ -229,5 +247,6 @@ def collect_mot_aux_loss(model: nn.Module, ddp_sync: bool = True) -> torch.Tenso
         total = total + (global_value.to(dtype=total.dtype) - total.detach())
 
     return total
+
 
 __all__ = ("C2fMoT", "collect_mot_aux_loss")

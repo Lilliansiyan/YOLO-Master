@@ -37,7 +37,6 @@ import os
 import sys
 import time
 import traceback
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -65,30 +64,23 @@ from ultralytics.utils import SETTINGS
 SETTINGS["wandb"] = False
 
 from ultralytics import YOLO
-from ultralytics.utils import ASSETS, LOGGER
+from ultralytics.utils import ASSETS
 
 # MoLoRA 基础设施
 from ultralytics.nn.peft.molora import (
     MoLoRAConfig,
-    MoLoRAMoEAwareConfig,
-    MoLoRAConfigBuilder,
     get_peft_molora_model,
-    build_moe_aware_layer,
-    mark_only_molora_as_trainable,
 )
-from ultralytics.nn.peft.molora.model import _parent_child_name, _get_submodule
 from ultralytics.nn.peft.molora.layer import MoLoRALayer
 
 # LoRA 基础设施
 from ultralytics.utils.lora import apply_lora, merge_lora_weights
-from ultralytics.utils.lora.config import LoRAConfig, LoRAConfigBuilder as LoRAStdConfigBuilder
+from ultralytics.utils.lora.config import LoRAConfig
 
 # 确认加载的是当前仓库的 ultralytics
 import ultralytics
 
-assert str(REPO_ROOT) in ultralytics.__file__, (
-    f"加载的不是当前仓库的 ultralytics！got {ultralytics.__file__}"
-)
+assert str(REPO_ROOT) in ultralytics.__file__, f"加载的不是当前仓库的 ultralytics！got {ultralytics.__file__}"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. 全局配置
@@ -96,7 +88,7 @@ assert str(REPO_ROOT) in ultralytics.__file__, (
 
 HERE = Path(__file__).parent
 MODEL_PATH = str(REPO_ROOT / "YOLO-Master-EsMoE-N.pt")
-DATA_YAML = "coco128.yaml"          # ultralytics 内置数据集，用于环境校验
+DATA_YAML = "coco128.yaml"  # ultralytics 内置数据集，用于环境校验
 RESULTS_JSON = HERE / "benchmark_latency_results.json"
 
 # 图像尺寸与批次
@@ -104,9 +96,9 @@ IMGSZ = 320
 BATCH = 1
 
 # 延迟测量参数
-WARMUP_RUNS = 10                    # 预热轮数
-TIMED_RUNS = 50                     # 正式测量轮数
-MIN_TIME_SEC = 10.0                 # 最少测量时长（秒）
+WARMUP_RUNS = 10  # 预热轮数
+TIMED_RUNS = 50  # 正式测量轮数
+MIN_TIME_SEC = 10.0  # 最少测量时长（秒）
 
 # 设备选择: MPS优先 → CUDA → CPU
 if torch.backends.mps.is_available():
@@ -129,6 +121,7 @@ LORA_DROPOUT = 0.05
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2. 工具函数
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def count_params(m: nn.Module) -> Tuple[int, int]:
     """统计模型总参数量与可训练参数量。"""
@@ -200,6 +193,7 @@ def _sigma_clip(data: np.ndarray, sigma: float = 2.0, max_iters: int = 3) -> np.
 # ═══════════════════════════════════════════════════════════════════════════════
 # 3. 模型准备 —— Baseline / LoRA / MoLoRA
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def prepare_baseline() -> YOLO:
     """加载 Baseline 模型（无 PEFT）。"""
@@ -296,6 +290,7 @@ def prepare_molora(merged: bool = False) -> Optional[YOLO]:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 4. 延迟测量 —— 三种后端
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _get_dummy_input_tensor(device: str, imgsz: int = IMGSZ) -> torch.Tensor:
     """构造与真实输入同形状的 dummy tensor 用于延迟测量。"""
@@ -554,11 +549,13 @@ def measure_tensorrt(model: YOLO, imgsz: int = IMGSZ) -> Optional[Dict[str, floa
 # 5. 实验变体定义与执行
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class BenchmarkSpec:
     """单个基准测试的规格定义。"""
-    method: str          # baseline | lora | molora
-    merged: bool         # merged / unmerged (baseline 无视此字段)
+
+    method: str  # baseline | lora | molora
+    merged: bool  # merged / unmerged (baseline 无视此字段)
     backends: List[str] = field(default_factory=lambda: ["pytorch", "onnx", "tensorrt"])
     description: str = ""
 
@@ -638,12 +635,14 @@ def run_single_benchmark(spec: BenchmarkSpec, backend: str) -> Dict[str, Any]:
         if latency is not None:
             record["latency"] = latency
             record["ok"] = True
-            print(f"  [Latency] mean={latency['mean_ms']:.2f}±{latency['std_ms']:.2f} ms  "
-                  f"median={latency['median_ms']:.2f} ms  p95={latency['p95_ms']:.2f} ms  "
-                  f"FPS={latency['fps']:.1f}")
+            print(
+                f"  [Latency] mean={latency['mean_ms']:.2f}±{latency['std_ms']:.2f} ms  "
+                f"median={latency['median_ms']:.2f} ms  p95={latency['p95_ms']:.2f} ms  "
+                f"FPS={latency['fps']:.1f}"
+            )
         else:
             record["error"] = "Latency measurement returned None"
-            print(f"  [Latency] FAILED")
+            print("  [Latency] FAILED")
 
     except Exception as exc:
         record["ok"] = False
@@ -666,6 +665,7 @@ def run_single_benchmark(spec: BenchmarkSpec, backend: str) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6. 结果汇总与输出
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 def print_header():
     """打印实验环境信息。"""
@@ -734,6 +734,7 @@ def save_results(all_records: List[Dict[str, Any]]) -> bool:
 # 7. 主流程
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def main():
     """主入口：遍历所有变体与后端，实时持久化结果。"""
     print_header()
@@ -746,7 +747,9 @@ def main():
     for spec in BENCHMARK_MATRIX:
         for backend in spec.backends:
             job_idx += 1
-            print(f"\n[Progress] {job_idx}/{total_jobs} — {spec.method} {'merged' if spec.merged else 'unmerged'} {backend}")
+            print(
+                f"\n[Progress] {job_idx}/{total_jobs} — {spec.method} {'merged' if spec.merged else 'unmerged'} {backend}"
+            )
             rec = run_single_benchmark(spec, backend)
             all_records.append(rec)
 
@@ -756,7 +759,7 @@ def main():
     # ── 最终汇总 ──
     print_summary_table(all_records)
 
-    print(f"\n{'='*88}")
+    print(f"\n{'=' * 88}")
     print(f"全部 {total_jobs} 个基准测试组合运行完毕。")
     print(f"详细结果 JSON: {RESULTS_JSON}")
     print("=" * 88)

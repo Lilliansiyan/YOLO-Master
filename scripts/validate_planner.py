@@ -18,17 +18,14 @@ import argparse
 import json
 import time
 import statistics
-import tempfile
 from pathlib import Path
 from datetime import datetime
 
-import torch
 import torch.nn as nn
 
 from ultralytics.utils.lora.planner import (
     ArchitectureFingerprint,
     PEFTPlanner,
-    DecisionAudit,
     _fingerprint_cache,
 )
 from ultralytics.utils.lora.config import LoRAConfig
@@ -37,6 +34,7 @@ from ultralytics.utils.lora.config import LoRAConfig
 # ─────────────────────────────────────────────────────────────────────────────
 # Benchmark
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_benchmark():
     """Measure Planner execution time with/without cache, and memory overhead."""
@@ -89,7 +87,9 @@ def run_benchmark():
 
     print(f"  Cold-start plan() latency: {statistics.mean(times_cold):.3f} ms (std={statistics.stdev(times_cold):.3f})")
     print(f"  Warm   plan() latency:     {statistics.mean(times_warm):.3f} ms (std={statistics.stdev(times_warm):.3f})")
-    print(f"  detect_targets() latency:  {statistics.mean(times_targets):.3f} ms (std={statistics.stdev(times_targets):.3f})")
+    print(
+        f"  detect_targets() latency:  {statistics.mean(times_targets):.3f} ms (std={statistics.stdev(times_targets):.3f})"
+    )
     print(f"  Cache speedup: {statistics.mean(times_cold) / statistics.mean(times_warm):.1f}x")
     print(f"  Cache entries alive: {len(_fingerprint_cache)}")
 
@@ -103,6 +103,7 @@ def run_benchmark():
 # ─────────────────────────────────────────────────────────────────────────────
 # Decision correctness
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_decision_check():
     """Verify Planner decisions for known architectures."""
@@ -172,6 +173,7 @@ def run_decision_check():
 # Audit log check
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def run_audit_check():
     """Verify audit JSON files in runs/planner_audit/."""
     print("\n" + "=" * 60)
@@ -196,7 +198,9 @@ def run_audit_check():
                 print(f"  ❌ {f.name}: missing keys {missing}")
                 all_valid = False
             else:
-                print(f"  ✅ {f.name}: {data['decision_status']} (variant={data['variant']}, rank={data['requested_rank']})")
+                print(
+                    f"  ✅ {f.name}: {data['decision_status']} (variant={data['variant']}, rank={data['requested_rank']})"
+                )
         except Exception as e:
             print(f"  ❌ {f.name}: parse error {e}")
             all_valid = False
@@ -207,6 +211,7 @@ def run_audit_check():
 # ─────────────────────────────────────────────────────────────────────────────
 # Training comparison (short, 3 epochs on COCO128)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def run_train_compare(model_name: str, epochs: int = 3, batch: int = 8, imgsz: int = 320):
     """Compare Planner ON vs OFF for a given model."""
@@ -221,7 +226,7 @@ def run_train_compare(model_name: str, epochs: int = 3, batch: int = 8, imgsz: i
     # --- OFF (baseline) ---
     print(f"\n  [Planner OFF] Loading {model_name}...")
     model_off = YOLO(model_name)
-    print(f"  [Planner OFF] Training...")
+    print("  [Planner OFF] Training...")
     r_off = model_off.train(
         data="ultralytics/cfg/datasets/coco128.yaml",
         epochs=epochs,
@@ -242,7 +247,7 @@ def run_train_compare(model_name: str, epochs: int = 3, batch: int = 8, imgsz: i
     # --- ON ---
     print(f"\n  [Planner ON] Loading {model_name}...")
     model_on = YOLO(model_name)
-    print(f"  [Planner ON] Training...")
+    print("  [Planner ON] Training...")
     r_on = model_on.train(
         data="ultralytics/cfg/datasets/coco128.yaml",
         epochs=epochs,
@@ -273,9 +278,12 @@ def run_train_compare(model_name: str, epochs: int = 3, batch: int = 8, imgsz: i
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def main():
     parser = argparse.ArgumentParser(description="Planner validation harness")
-    parser.add_argument("--mode", choices=["benchmark", "decision-check", "train-compare", "audit-check", "all"], default="all")
+    parser.add_argument(
+        "--mode", choices=["benchmark", "decision-check", "train-compare", "audit-check", "all"], default="all"
+    )
     parser.add_argument("--model", default="yolo11s.pt", help="Model for train-compare")
     parser.add_argument("--epochs", type=int, default=3, help="Epochs for train-compare")
     args = parser.parse_args()

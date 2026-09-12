@@ -10,6 +10,7 @@ import pytest
 import torch
 
 from tests import MODEL, SOURCE, TASK_MODEL_DATA
+from tests.dataset_fixtures import tiny_coco_multitask_yaml
 from ultralytics import YOLO
 from ultralytics.cfg import get_cfg
 from ultralytics.engine.exporter import Exporter
@@ -127,6 +128,9 @@ def test_task(trainer_cls, validator_cls, predictor_cls, data, model, weights):
 @pytest.mark.parametrize("task,weight,data", TASK_MODEL_DATA)
 def test_resume_incomplete(task, weight, data, tmp_path):
     """Test training resumes from an incomplete checkpoint."""
+    if task == "multitask":
+        # Multi-task training requires COCO-format aligned targets; no 8-image multi-task fixture ships in-repo
+        data = tiny_coco_multitask_yaml(tmp_path / "mt_data")
     train_args = {
         "data": data,
         "epochs": 2,

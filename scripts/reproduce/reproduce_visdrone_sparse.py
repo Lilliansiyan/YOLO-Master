@@ -15,8 +15,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _reproduce_common import (
-    DatasetSpec, ModelSpec, _read_last_metrics, _float_or_blank,
-    write_summary, _completed_epoch, _make_wandb_callbacks,
+    DatasetSpec,
+    ModelSpec,
+    _completed_epoch,
+    _make_wandb_callbacks,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -56,7 +58,6 @@ def _make_sparse_topk_callback():
 
 def _make_routing_diag_callback(every_n_epochs: int = 5):
     """每 N 个 epoch 在验证后收集路由诊断指标，记录到 W&B 及训练日志。"""
-    from ultralytics.nn.modules.moe.modules import ES_MOE
     from ultralytics.utils import LOGGER
 
     def _on_val_end(trainer):
@@ -102,11 +103,14 @@ def _make_routing_diag_callback(every_n_epochs: int = 5):
             try:
                 wandb_run = getattr(trainer, "wandb", None)
                 if wandb_run is not None:
-                    wandb_run.log({
-                        f"routing/{short}/gini": gini,
-                        f"routing/{short}/dominant": dominant,
-                        "routing/epoch": epoch,
-                    }, step=epoch)
+                    wandb_run.log(
+                        {
+                            f"routing/{short}/gini": gini,
+                            f"routing/{short}/dominant": dominant,
+                            "routing/epoch": epoch,
+                        },
+                        step=epoch,
+                    )
                     for i, u in enumerate(usage):
                         wandb_run.log({f"routing/{short}/E{i}_usage": u}, step=epoch)
             except Exception:
@@ -117,6 +121,7 @@ def _make_routing_diag_callback(every_n_epochs: int = 5):
 
 def _compute_gini(values):
     import numpy as np
+
     arr = np.array(values, dtype=np.float64)
     total = arr.sum()
     if total <= 0:
@@ -190,8 +195,7 @@ def train_sparse(args):
         verbose=args.verbose,
         moe_balance_loss=args.moe_balance_loss,
     )
-    return {"model": spec.name, "status": "resumed" if resume else "ok",
-            "duration_s": f"{time.time() - start:.1f}"}
+    return {"model": spec.name, "status": "resumed" if resume else "ok", "duration_s": f"{time.time() - start:.1f}"}
 
 
 if __name__ == "__main__":
@@ -223,13 +227,16 @@ if __name__ == "__main__":
 
     if args.check_build:
         from ultralytics.nn.tasks import DetectionModel
+
         m = DetectionModel(str(ROOT / SPARSE_MODEL.cfg), ch=3, nc=80, verbose=False)
         print(f"[build-ok] {SPARSE_MODEL.name}: {sum(p.numel() for p in m.parameters()) / 1e6:.3f}M")
         sys.exit(0)
 
     if args.dry_run:
-        print(f"[dry-run] Project: {args.project}  epochs={args.epochs}  batch={args.batch}  "
-              f"device={args.device}  wandb={args.wandb}")
+        print(
+            f"[dry-run] Project: {args.project}  epochs={args.epochs}  batch={args.batch}  "
+            f"device={args.device}  wandb={args.wandb}"
+        )
         sys.exit(0)
 
     Path(args.project).mkdir(parents=True, exist_ok=True)
@@ -243,13 +250,14 @@ if __name__ == "__main__":
 
     # 收集产物到项目目录
     dataset = DatasetSpec("VisDrone", "VisDrone.yaml", args.project)
-    run_dir = Path(args.project) / f"{dataset.name}_{spec.name}"
+    run_dir = Path(args.project) / f"{dataset.name}_{SPARSE_MODEL.name}"
     out_dir = Path(args.project) / "baseline"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     best_src = run_dir / "weights" / "best.pt"
     if best_src.exists():
         import shutil
+
         shutil.copy2(best_src, out_dir / "best.pt")
         print(f"[collect] best.pt -> {out_dir / 'best.pt'}")
 
@@ -257,6 +265,7 @@ if __name__ == "__main__":
         src = run_dir / f
         if src.exists():
             import shutil
+
             shutil.copy2(src, out_dir / f)
             print(f"[collect] {f} -> {out_dir / f}")
 
