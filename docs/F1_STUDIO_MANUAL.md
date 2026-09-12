@@ -3,6 +3,8 @@
 ## 目录 / Contents
 
 1. [启动 / Getting Started](#getting-started)
+   - [Gradio 界面](#启动界面--launch-interface)
+   - [REST API + React UI](#rest-api--react-ui-启动--rest-api--react-ui-launch)
 2. [任务提交 / Submit Tasks](#submit-tasks)
 3. [查看产物 / View Artifacts](#view-artifacts)
 4. [环境检查 / Environment Check](#environment-check)
@@ -22,6 +24,43 @@ python3 app.py
 界面将在浏览器自动打开: `http://127.0.0.1:7860`
 
 The interface will automatically open in your browser at: `http://127.0.0.1:7860`
+
+### REST API + React UI 启动 / REST API + React UI Launch
+
+FastAPI 后端 + React 前端提供程序化任务提交和状态监控。
+
+**1. 启动 API 服务器 / Start the API server:**
+
+```bash
+cd /path/to/YOLO-Master
+uvicorn api:app --reload --port 8000
+```
+
+API 文档自动生成，访问: `http://127.0.0.1:8000/docs`
+
+**2. 启动 React 开发界面 / Start the React dev UI** (新开终端 / separate terminal):
+
+```bash
+cd frontend
+npm install   # 首次运行 / first time only
+npm run dev   # 启动于 http://localhost:5173
+```
+
+**API 端点一览 / API Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/tasks/train` | 提交训练任务 |
+| `POST` | `/api/tasks/predict` | 提交推理任务 |
+| `POST` | `/api/tasks/export` | 提交导出任务 |
+| `POST` | `/api/tasks/system-check` | 系统环境检查（异步，立即返回202）|
+| `GET`  | `/api/tasks` | 列出所有任务（支持分页）|
+| `GET`  | `/api/tasks/{job_id}` | 查询单个任务状态及产物 |
+| `DELETE` | `/api/tasks/{job_id}` | 取消进行中的任务 |
+| `GET`  | `/api/tasks/{job_id}/metrics` | 获取训练指标 |
+| `GET`  | `/health` | 健康检查 |
+
+---
 
 ### 界面导航 / Navigation
 
