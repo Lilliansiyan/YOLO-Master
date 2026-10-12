@@ -1429,6 +1429,7 @@ class MultiTaskLoss(nn.Module):
         pose_loss (v8PoseLoss | PoseLoss26 | None): Pose estimation loss.
         cls_loss (nn.BCEWithLogitsLoss | None): Image multi-label classification loss.
         task_weights (dict): Static per-task loss weights.
+        moe_loss_coeff (float): MoE/MoT auxiliary loss coefficient.
     """
 
     def __init__(self, model):
@@ -1483,6 +1484,7 @@ class MultiTaskLoss(nn.Module):
             nn.CrossEntropyLoss(ignore_index=255, reduction="none") if head.has_task("semantic") else None
         )
 
+        # Task weights (from model or defaults)
         self.task_weights = getattr(
             model,
             "task_weights",
